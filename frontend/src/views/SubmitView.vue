@@ -1,6 +1,10 @@
 <script setup>
 import { onMounted, ref } from "vue";
+import { useRouter } from "vue-router";
 import http from "../api";
+
+const router = useRouter();
+const ready = ref(false);
 
 const tree = ref([]);
 const categoryId = ref("");
@@ -10,6 +14,13 @@ const description = ref("");
 const message = ref("");
 
 onMounted(async () => {
+  try {
+    await http.get("/auth/me");
+  } catch {
+    router.replace("/login");
+    return;
+  }
+  ready.value = true;
   const { data } = await http.get("/tree");
   tree.value = data.filter((tab) => tab.kind === "links");
   categoryId.value = tree.value[0]?.categories[0]?.id || "";
@@ -35,8 +46,8 @@ async function send() {
 </script>
 
 <template>
-  <form class="page form" @submit.prevent="send">
-    <p><a href="/">Nav</a></p>
+  <form v-if="ready" class="page form" @submit.prevent="send">
+    <p><a href="/">NEXA</a></p>
     <h1>Submit a link</h1>
     <select v-model="categoryId">
       <optgroup v-for="tab in tree" :key="tab.id" :label="tab.title">

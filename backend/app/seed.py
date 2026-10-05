@@ -35,8 +35,8 @@ def seed(db: Session) -> str:
     home = db.scalar(select(Tab).where(Tab.slug == "github"))
     if home:
         home.slug = "general"
-        home.title_en = "Home"
-        home.title_zh = "综合"
+        home.title_en = "News"
+        home.title_zh = "综合资讯"
         home.kind = "home"
         home.sort = -1
     if db.scalar(select(Tab.id)):
@@ -48,7 +48,7 @@ def seed(db: Session) -> str:
         ("cross-border", "Cross-border", "跨境电商", "links", False, [("sourcing", "Sourcing", "选品")]),
         ("resources", "Resources", "资料", "links", False, [("reports", "Reports", "报告")]),
         ("media", "Media", "媒体", "links", False, [("video", "Video", "视频")]),
-        ("general", "Home", "综合", "home", False, []),
+        ("general", "News", "综合资讯", "home", False, []),
         ("adult", "Adult", "成人", "links", True, [("sites", "Sites", "站点")]),
     ]
     for index, (slug, en, zh, kind, adult, cats) in enumerate(samples):
@@ -88,8 +88,8 @@ def seed(db: Session) -> str:
             key="contact",
             title_en="Contact",
             title_zh="联系方式",
-            body_en="Reach the editor with the details below.",
-            body_zh="通过下面的方式联系站点编辑。",
+            body_en="Site and advertising inquiries both use the contacts below.",
+            body_zh="站点事务和广告合作都用下面的联系方式。",
             email="editor@example.com",
         )
     )

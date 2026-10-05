@@ -6,6 +6,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
 from app.db import Base, SessionLocal, engine
 from app.routers import admin, auth, public
+from app.github_ranks import schedule_daily
+from fetch_news import schedule_news
+from fill_daily import schedule_directory
 from app.seed import seed
 
 
@@ -18,6 +21,9 @@ async def lifespan(_app: FastAPI):
         print(f"Admin gate path: /{gate}")
     finally:
         db.close()
+    schedule_daily()
+    schedule_news()
+    schedule_directory()
     yield
 
 

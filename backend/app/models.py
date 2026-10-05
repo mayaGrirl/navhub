@@ -99,13 +99,27 @@ class Page(Base):
     address: Mapped[str] = mapped_column(String(255), default="")
 
 
+class GithubRank(Base):
+    __tablename__ = "github_ranks"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    period: Mapped[str] = mapped_column(String(20), index=True)
+    repo_name: Mapped[str] = mapped_column(String(160))
+    description: Mapped[str] = mapped_column(Text, default="")
+    stars: Mapped[str] = mapped_column(String(40), default="")
+    language: Mapped[str] = mapped_column(String(40), default="")
+    position: Mapped[int] = mapped_column(Integer, default=0)
+    fetched_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
 class NewsItem(Base):
     __tablename__ = "news_items"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     title: Mapped[str] = mapped_column(String(300))
-    url: Mapped[str] = mapped_column(String(500), unique=True)
+    url: Mapped[str] = mapped_column(String(500))
     source: Mapped[str] = mapped_column(String(80), default="")
+    category: Mapped[str] = mapped_column(String(40), default="news")
     summary: Mapped[str] = mapped_column(Text, default="")
     published_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 

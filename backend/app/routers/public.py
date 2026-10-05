@@ -1,7 +1,7 @@
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.config import settings
@@ -37,6 +37,43 @@ def tree(locale: str = "en", db: Session = Depends(db_session)):
             }
         )
     return payload
+
+
+@router.get("/search")
+def search(q: str = "", locale: str = "en", db: Session = Depends(db_session)):
+    query = q.strip()
+    if not query:
+        return []
+    like = f"%{query}%"
+    rows = db.execute(
+        select(Link, Category, Tab)
+        .join(Category, Link.category_id == Category.id)
+        .join(Tab, Category.tab_id == Tab.id)
+        .where(
+            Link.status == "published",
+            Tab.visible.is_(True),
+            Category.visible.is_(True),
+            or_(
+                Link.title_zh.like(like),
+                Link.title_en.like(like),
+                Link.url.like(like),
+                Link.description_zh.like(like),
+                Link.description_en.like(like),
+            ),
+        )
+        .limit(20)
+    ).all()
+    return [
+        {
+            "id": link.id,
+            "title": _t(locale, link.title_en, link.title_zh),
+            "url": link.url,
+            "logo_url": link.logo_url,
+            "tab": _t(locale, tab.title_en, tab.title_zh),
+            "category": _t(locale, category.title_en, category.title_zh),
+        }
+        for link, category, tab in rows
+    ]
 
 
 @router.get("/links")
@@ -101,13 +138,23 @@ def announcements(locale: str = "en", db: Session = Depends(db_session)):
 
 @router.get("/news")
 def news(db: Session = Depends(db_session)):
-    rows = db.scalars(select(NewsItem).order_by(NewsItem.published_at.desc(), NewsItem.id.desc()).limit(40)).all()
+    from fetch_news import today_start
+
+    categories = db.scalars(select(NewsItem.category).where(NewsItem.published_at >= today_start()).distinct()).all()
+    rows = []
+    for category in categories:
+        rows.extend(
+            db.scalars(
+                select(NewsItem).where(NewsItem.category == category, NewsItem.published_at >= today_start()).order_by(NewsItem.published_at.desc(), NewsItem.id.desc()).limit(8)
+            ).all()
+        )
     return [
         {
             "id": row.id,
             "title": row.title,
             "url": row.url,
             "source": row.source,
+            "category": row.category,
             "summary": row.summary,
             "published_at": row.published_at.isoformat() if row.published_at else None,
         }
@@ -144,33 +191,11 @@ def board(tab_id: int, locale: str = "en", db: Session = Depends(db_session)):
 
 @router.get("/github")
 def github(period: str = "past_24_hours"):
-    allowed = {"past_24_hours", "past_week", "past_month"}
-    if period not in allowed:
+    from app.github_ranks import load_ranks
+
+    if period not in {"past_24_hours", "past_week", "past_month", "total"}:
         period = "past_24_hours"
-    cache_key = f"github:{period}"
-    cached = rds.get(cache_key)
-    if cached:
-        import json
-
-        return json.loads(cached)
-    import httpx
-
-    try:
-        response = httpx.get(
-            "https://api.ossinsight.io/v1/trends/repos/",
-            params={"period": period, "language": "All"},
-            timeout=20,
-            headers={"Accept": "application/json"},
-        )
-        response.raise_for_status()
-        data = response.json().get("data", {}).get("rows", [])[:20]
-    except Exception:
-        return []
-    import json
-
-    if data:
-        rds.setex(cache_key, 3600, json.dumps(data))
-    return data
+    return load_ranks(period)
 
 
 @router.post("/submissions")

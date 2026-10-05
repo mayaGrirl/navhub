@@ -12,6 +12,8 @@ const i18n = createI18n({
   locale: localStorage.getItem("locale") || "en",
   messages: {
     en: {
+      brand: "NEXA",
+      tagline: "Tools, news and rankings",
       about: "About",
       ads: "Advertise",
       contact: "Contact",
@@ -29,6 +31,8 @@ const i18n = createI18n({
       empty: "Nothing in this section yet.",
     },
     zh: {
+      brand: "NEXA",
+      tagline: "工具、资讯与排行",
       about: "关于我们",
       ads: "广告合作",
       contact: "联系方式",

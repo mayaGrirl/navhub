@@ -21,6 +21,30 @@ const linkForm = ref({ category_id: "", title_en: "", title_zh: "", url: "", des
 const tabForm = ref({ slug: "", title_en: "", title_zh: "", kind: "links", adult: false });
 const catForm = ref({ tab_id: "", slug: "", title_en: "", title_zh: "" });
 const crawlForm = ref({ url: "", category_id: "" });
+const adForm = ref({ slot: "banner", title_zh: "广告位", title_en: "Ad slot", image_url: "/ad-placeholder.svg", link_url: "/contact", enabled: true, sort: 0 });
+const slotGroups = [
+  { page: "首页顶部右侧", items: [{ id: "banner", where: "搜索框右边轮播" }] },
+  { page: "首页右侧 GitHub", items: [
+    { id: "github-growth", where: "增量榜下面" },
+    { id: "github-total", where: "总量榜下面" },
+  ] },
+  { page: "综合资讯内容区", items: [1, 2, 3, 4].map((n) => ({ id: `feed-general-${n}`, where: `第 ${n} 条，隔两个分类出现` })) },
+  { page: "AI工具内容区", items: [1, 2, 3, 4].map((n) => ({ id: `feed-ai-${n}`, where: `第 ${n} 条，隔两个分类出现` })) },
+  { page: "跨境电商内容区", items: [1, 2, 3, 4].map((n) => ({ id: `feed-cross-border-${n}`, where: `第 ${n} 条，隔两个分类出现` })) },
+  { page: "午夜媒体内容区", items: [1, 2, 3, 4].map((n) => ({ id: `feed-media-${n}`, where: `第 ${n} 条，隔两个分类出现` })) },
+  { page: "TG群内容区", items: [1, 2, 3, 4].map((n) => ({ id: `feed-telegram-${n}`, where: `第 ${n} 条，隔两个分类出现` })) },
+  { page: "关于我们右侧", items: [1, 2, 3].map((n) => ({ id: `about-${n}`, where: `右侧第 ${n} 个` })) },
+  { page: "联系方式右侧", items: [1, 2, 3].map((n) => ({ id: `contact-${n}`, where: `右侧第 ${n} 个` })) },
+  { page: "登录 / 注册左侧", items: [1, 2, 3].map((n) => ({ id: `auth-${n}`, where: `左侧轮播第 ${n} 张` })) },
+  { page: "页面底部", items: [{ id: "footer", where: "页脚右侧广告" }] },
+];
+function slotWhere(id) {
+  for (const group of slotGroups) {
+    const found = group.items.find((item) => item.id === id);
+    if (found) return `${group.page} · ${found.where}`;
+  }
+  return id;
+}
 const error = ref("");
 
 async function load() {
@@ -90,6 +114,14 @@ async function approve(id) {
   await http.post(`/manage/crawl/items/${id}/approve`);
   await load();
 }
+async function saveAd() {
+  await http.post("/manage/ads", adForm.value);
+  await load();
+}
+async function removeAd(id) {
+  await http.delete(`/manage/ads/${id}`);
+  await load();
+}
 async function setPlan(user, plan) {
   await http.put(`/manage/users/${user.id}`, { plan, days: 30 });
   await load();
@@ -116,6 +148,7 @@ async function setPlan(user, plan) {
         <button class="text-btn" @click="section = 'links'">Links</button>
         <button class="text-btn" @click="section = 'structure'">Tabs</button>
         <button class="text-btn" @click="section = 'pages'">Pages</button>
+        <button class="text-btn" @click="section = 'ads'">Ads</button>
         <button class="text-btn" @click="section = 'crawl'">Crawl</button>
         <button class="text-btn" @click="section = 'users'">Users</button>
       </div>
@@ -157,11 +190,32 @@ async function setPlan(user, plan) {
           <textarea v-model="page.body_zh" rows="3"></textarea>
           <input v-model="page.email" placeholder="Email" />
           <input v-model="page.phone" placeholder="Phone" />
-          <input v-model="page.im" placeholder="IM" />
+          <input v-model="page.im" placeholder="Telegram，如 nexa 或 https://t.me/nexa" />
           <input v-model="page.address" placeholder="Address" />
           <button class="primary">Save</button>
         </form>
       </div>
+      <form v-if="section === 'ads'" class="form" @submit.prevent="saveAd">
+        <p>选位置后再添加。删掉后，前台那个位置马上不再显示。</p>
+        <select v-model="adForm.slot">
+          <optgroup v-for="group in slotGroups" :key="group.page" :label="group.page">
+            <option v-for="item in group.items" :key="item.id" :value="item.id">{{ group.page }} · {{ item.where }}</option>
+          </optgroup>
+        </select>
+        <input v-model="adForm.title_zh" placeholder="中文名称" />
+        <input v-model="adForm.title_en" placeholder="English name" />
+        <input v-model="adForm.image_url" placeholder="图片地址" />
+        <input v-model="adForm.link_url" placeholder="跳转地址" />
+        <button class="primary">Add ad</button>
+        <table>
+          <tr><th>显示位置</th><th>名称</th><th></th></tr>
+          <tr v-for="ad in ads" :key="ad.id">
+            <td>{{ slotWhere(ad.slot) }}</td>
+            <td>{{ ad.title_zh || ad.title_en }}</td>
+            <td><button type="button" @click="removeAd(ad.id)">删除</button></td>
+          </tr>
+        </table>
+      </form>
       <form v-if="section === 'crawl'" class="form" @submit.prevent="fetchCrawl">
         <input v-model="crawlForm.url" placeholder="https://example.com" required />
         <input v-model="crawlForm.category_id" placeholder="Category id" required />
