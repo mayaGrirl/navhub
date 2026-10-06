@@ -19,6 +19,7 @@ const jobs = ref([]);
 const levels = ref([]);
 const pointsPerLink = ref(1);
 const items = ref([]);
+const alerts = ref([]);
 const proxies = ref({ count: 0, sources: 0, items: [], source_items: [], note: "" });
 const me = ref(null);
 const totp = ref(null);
@@ -59,7 +60,7 @@ const consoleCode = ref("");
 const needConsole = ref(false);
 
 async function load() {
-  const [t, c, l, p, a, u, j, i, lv] = await Promise.all([
+  const [t, c, l, p, a, u, j, i, lv, al] = await Promise.all([
     http.get("/manage/tabs"),
     http.get("/manage/categories"),
     http.get("/manage/links"),
@@ -69,6 +70,7 @@ async function load() {
     http.get("/manage/crawl/jobs"),
     http.get("/manage/crawl/items"),
     http.get("/manage/levels"),
+    http.get("/manage/alerts"),
   ]);
   tabs.value = t.data;
   categories.value = c.data;
@@ -80,6 +82,7 @@ async function load() {
   items.value = i.data;
   levels.value = lv.data.levels || [];
   pointsPerLink.value = lv.data.points_per_link || 1;
+  alerts.value = al.data;
   try {
     proxies.value = (await http.get("/manage/proxies")).data;
   } catch {
@@ -178,6 +181,18 @@ async function dropSource(url) {
   await http.delete("/manage/proxy-sources", { params: { url } });
   await load();
 }
+function sourceLabel(source) {
+  if (source === "user") return "用户提交";
+  return "系统";
+}
+async function banAlert(id) {
+  await http.post(`/manage/alerts/${id}/ban`);
+  await load();
+}
+async function banUser(user) {
+  await http.put(`/manage/users/${user.id}`, { banned: !user.banned });
+  await load();
+}
 async function setPlan(user, plan) {
   await http.put(`/manage/users/${user.id}`, { plan, days: 30 });
   await load();
@@ -208,6 +223,7 @@ async function setPlan(user, plan) {
     </div>
     <template v-else>
       <div class="nav-links">
+        <button class="text-btn" @click="section = 'alerts'">报警 {{ alerts.filter((item) => !item.handled).length }}</button>
         <button class="text-btn" @click="section = 'links'">Links</button>
         <button class="text-btn" @click="section = 'structure'">Tabs</button>
         <button class="text-btn" @click="section = 'pages'">Pages</button>
@@ -232,6 +248,9 @@ async function setPlan(user, plan) {
         <table>
           <tr v-for="link in links" :key="link.id">
             <td>{{ link.title_zh || link.title_en }}</td>
+            <td>{{ sourceLabel(link.source) }}</td>
+            <td>{{ link.status }}</td>
+            <td>{{ link.review_note }}</td>
             <td><input v-model.number="link.favorite_count" type="number" min="0" /></td>
             <td><input v-model.number="link.recommend_count" type="number" min="0" /></td>
             <td><button type="button" @click="saveCounts(link)">保存次数</button></td>
@@ -324,14 +343,24 @@ async function setPlan(user, plan) {
           <tr v-for="item in proxies.source_items" :key="item.url"><td>{{ item.url }}</td><td><button type="button" @click="dropSource(item.url)">删除</button></td></tr>
         </table>
       </div>
+      <div v-if="section === 'alerts'" class="form">
+        <p v-if="!alerts.length">暂无报警</p>
+        <p v-for="item in alerts" :key="item.id">
+          {{ item.email }} · {{ item.ip }} · {{ item.detail }}
+          <button v-if="!item.handled" type="button" @click="banAlert(item.id)">封禁账号和 IP</button>
+          <span v-else>已处理</span>
+        </p>
+      </div>
       <table v-if="section === 'users'">
         <tr v-for="user in users" :key="user.id">
           <td>{{ user.email }}</td>
           <td>{{ user.role }}</td>
           <td>{{ user.plan }}</td>
+          <td>{{ user.banned ? "已封禁" : user.last_ip }}</td>
           <td>
             <button @click="setPlan(user, 'vip')">VIP 30d</button>
             <button @click="setPlan(user, 'free')">Free</button>
+            <button @click="banUser(user)">{{ user.banned ? "解封" : "封禁" }}</button>
           </td>
         </tr>
       </table>

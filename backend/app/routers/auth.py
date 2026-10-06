@@ -95,6 +95,8 @@ def login(body: Creds, response: Response, db: Session = Depends(db_session)):
     if not user or not verify_password(body.password, user.password_hash):
         record_failure(email)
         raise HTTPException(status_code=401, detail="invalid credentials")
+    if user.banned:
+        raise HTTPException(status_code=403, detail="banned")
     clear_failure(email)
     token = new_session(user.id, user.role, False)
     _cookie(response, token)

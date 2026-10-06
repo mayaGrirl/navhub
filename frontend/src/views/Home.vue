@@ -1,8 +1,10 @@
 <script setup>
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
+import { useRoute } from "vue-router";
 import { useI18n } from "vue-i18n";
 import http from "../api";
 
+const route = useRoute();
 const { t, locale } = useI18n();
 const tabs = ref([]);
 const tabId = ref(null);
@@ -39,6 +41,10 @@ const engineGroups = [
       { id: "yahoo", zh: "Yahoo", en: "Yahoo" },
       { id: "yandex", zh: "Yandex", en: "Yandex" },
       { id: "ecosia", zh: "Ecosia", en: "Ecosia" },
+      { id: "naver", zh: "Naver", en: "Naver" },
+      { id: "yahoojp", zh: "Yahoo日本", en: "Yahoo Japan" },
+      { id: "seznam", zh: "Seznam", en: "Seznam" },
+      { id: "coccoc", zh: "Cốc Cốc", en: "Cốc Cốc" },
     ],
   },
   {
@@ -50,6 +56,9 @@ const engineGroups = [
       { id: "startpage", zh: "Startpage", en: "Startpage" },
       { id: "qwant", zh: "Qwant", en: "Qwant" },
       { id: "miji", zh: "秘迹", en: "Miji" },
+      { id: "mojeek", zh: "Mojeek", en: "Mojeek" },
+      { id: "kagi", zh: "Kagi", en: "Kagi" },
+      { id: "you", zh: "You", en: "You" },
     ],
   },
   {
@@ -62,6 +71,9 @@ const engineGroups = [
       { id: "bilibili", zh: "哔哩哔哩", en: "Bilibili" },
       { id: "zhihu", zh: "知乎", en: "Zhihu" },
       { id: "x", zh: "X", en: "X" },
+      { id: "reddit", zh: "Reddit", en: "Reddit" },
+      { id: "wikipedia", zh: "维基", en: "Wikipedia" },
+      { id: "youtube", zh: "YouTube", en: "YouTube" },
     ],
   },
   {
@@ -97,6 +109,8 @@ function feedAdAt(index) {
 }
 const activeSection = ref(null);
 const adultOk = ref(localStorage.getItem("adult-ok-2") === "1");
+const footOpen = ref(true);
+watch(footOpen, (open) => document.body.classList.toggle("foot-off", !open), { immediate: true });
 
 const currentTab = computed(() => tabs.value.find((item) => item.id === tabId.value));
 const isHome = computed(() => !currentTab.value || currentTab.value.kind === "home");
@@ -300,7 +314,7 @@ function useFallback(event, link) {
   }
 }
 
-function searchWeb() {
+async function searchWeb() {
   const text = query.value.trim();
   const direct = ["browserscan", "browserleaks", "creepjs", "amiunique"].includes(engine.value);
   if (!text && !direct) return;
@@ -315,17 +329,27 @@ function searchWeb() {
     yahoo: `https://search.yahoo.com/search?p=${encoded}`,
     yandex: `https://yandex.com/search/?text=${encoded}`,
     ecosia: `https://www.ecosia.org/search?q=${encoded}`,
+    naver: `https://search.naver.com/search.naver?query=${encoded}`,
+    yahoojp: `https://search.yahoo.co.jp/search?p=${encoded}`,
+    seznam: `https://search.seznam.cz/?q=${encoded}`,
+    coccoc: `https://coccoc.com/search?query=${encoded}`,
     duckduckgo: `https://duckduckgo.com/?q=${encoded}`,
     brave: `https://search.brave.com/search?q=${encoded}`,
     startpage: `https://www.startpage.com/sp/search?query=${encoded}`,
     qwant: `https://www.qwant.com/?q=${encoded}`,
     miji: `https://mijisou.com/?q=${encoded}`,
+    mojeek: `https://www.mojeek.com/search?q=${encoded}`,
+    kagi: `https://kagi.com/search?q=${encoded}`,
+    you: `https://you.com/search?q=${encoded}`,
     weibo: `https://s.weibo.com/weibo?q=${encoded}`,
     xhs: `https://www.xiaohongshu.com/search_result?keyword=${encoded}`,
     douyin: `https://www.douyin.com/search/${encoded}`,
     bilibili: `https://search.bilibili.com/all?keyword=${encoded}`,
     zhihu: `https://www.zhihu.com/search?type=content&q=${encoded}`,
     x: `https://x.com/search?q=${encoded}`,
+    reddit: `https://www.reddit.com/search/?q=${encoded}`,
+    wikipedia: `https://${locale.value === "zh" ? "zh" : "en"}.wikipedia.org/w/index.php?search=${encoded}`,
+    youtube: `https://www.youtube.com/results?search_query=${encoded}`,
     browserscan: "https://www.browserscan.net/zh",
     browserleaks: "https://browserleaks.com/",
     creepjs: "https://abrahamjuliot.github.io/creepjs/",
@@ -406,10 +430,20 @@ onMounted(async () => {
   loadMine();
   if (adRes.status === "fulfilled") ads.value = adRes.value.data;
   loadRanks("past_24_hours");
+  if (route.query.link) {
+    await focusHit({
+      id: Number(route.query.link),
+      tab_id: Number(route.query.tab),
+      category_id: Number(route.query.cat),
+    });
+  }
 });
 
 const bannerTimer = setInterval(() => moveBanner(1), 4000);
-onUnmounted(() => clearInterval(bannerTimer));
+onUnmounted(() => {
+  clearInterval(bannerTimer);
+  document.body.classList.remove("foot-off");
+});
 </script>
 
 <template>
@@ -652,7 +686,8 @@ onUnmounted(() => clearInterval(bannerTimer));
       </aside>
     </div>
 
-    <footer class="foot">
+    <footer v-if="footOpen" class="foot">
+      <button type="button" class="foot-x" :aria-label="locale === 'zh' ? '关闭底部栏' : 'Close footer'" @click="footOpen = false">×</button>
       <div class="foot-main">
         <div class="foot-brand">
           <a class="brand" href="/"><img src="/logo.svg" alt="" />NEXA</a>

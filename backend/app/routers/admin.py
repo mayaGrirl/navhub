@@ -7,7 +7,8 @@ from sqlalchemy.orm import Session
 
 from app.crawl import fetch_meta
 from app.deps import db_session, require_admin, require_admin_setup
-from app.models import Ad, Announcement, Category, CrawlItem, CrawlJob, Level, Link, Page, PointRule, Tab, User
+from app.models import Ad, AdminAlert, Announcement, Category, CrawlItem, CrawlJob, IpBan, Level, Link, Page, PointRule, Tab, User
+from app.urls import norm_url
 router = APIRouter(prefix="/api/manage", tags=["admin"], dependencies=[Depends(require_admin)])
 setup_router = APIRouter(prefix="/api/manage", tags=["admin"])
 
@@ -161,6 +162,8 @@ def _link(row: Link) -> dict:
         "vip_badge": row.vip_badge,
         "status": row.status,
         "source": row.source,
+        "review_note": row.review_note or "",
+        "client_ip": row.client_ip or "",
         "sort": row.sort,
         "favorite_count": row.favorite_count or 0,
         "recommend_count": row.recommend_count or 0,
@@ -188,6 +191,7 @@ def create_link(payload: dict, db: Session = Depends(db_session)):
         attachment_url=payload.get("attachment_url") or "",
         is_free=bool(payload.get("is_free", False)),
         is_hot=bool(payload.get("is_hot", False)),
+        norm_url=norm_url(payload["url"]),
         status=payload.get("status") or "published",
         source="admin",
         sort=int(payload.get("sort") or 0),
@@ -339,6 +343,8 @@ def users(db: Session = Depends(db_session)):
             "plan": r.plan,
             "plan_expires_at": r.plan_expires_at.isoformat() if r.plan_expires_at else None,
             "totp_enabled": r.totp_enabled,
+            "banned": bool(r.banned),
+            "last_ip": r.last_ip or "",
         }
         for r in rows
     ]
@@ -351,6 +357,14 @@ def update_user(user_id: int, payload: dict, db: Session = Depends(db_session)):
         raise HTTPException(404, "not found")
     if "role" in payload:
         row.role = payload["role"]
+    if "banned" in payload:
+        row.banned = bool(payload["banned"])
+        if row.last_ip:
+            existing = db.scalar(select(IpBan).where(IpBan.ip == row.last_ip))
+            if row.banned and not existing:
+                db.add(IpBan(ip=row.last_ip, reason="admin"))
+            if not row.banned and existing:
+                db.delete(existing)
     if payload.get("plan") in {"free", "vip"}:
         row.plan = payload["plan"]
         if row.plan == "vip":
@@ -358,6 +372,31 @@ def update_user(user_id: int, payload: dict, db: Session = Depends(db_session)):
             row.plan_expires_at = datetime.utcnow() + timedelta(days=days)
         else:
             row.plan_expires_at = None
+    db.commit()
+    return {"ok": True}
+
+
+@router.get("/alerts")
+def alerts(db: Session = Depends(db_session)):
+    rows = db.scalars(select(AdminAlert).order_by(AdminAlert.id.desc()).limit(50)).all()
+    return [
+        {"id": row.id, "user_id": row.user_id, "email": row.email, "ip": row.ip, "detail": row.detail, "handled": row.handled}
+        for row in rows
+    ]
+
+
+@router.post("/alerts/{alert_id}/ban")
+def ban_from_alert(alert_id: int, db: Session = Depends(db_session)):
+    row = db.get(AdminAlert, alert_id)
+    if not row:
+        raise HTTPException(404, "not found")
+    user = db.get(User, row.user_id) if row.user_id else None
+    if user:
+        user.banned = True
+    ip = row.ip or (user.last_ip if user else "")
+    if ip and not db.scalar(select(IpBan.id).where(IpBan.ip == ip)):
+        db.add(IpBan(ip=ip, reason=row.detail or "alert"))
+    row.handled = True
     db.commit()
     return {"ok": True}
 

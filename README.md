@@ -43,6 +43,39 @@ docker-compose.yml
 | `/contact` | 联系方式 |
 | `/<后台路径>` | 管理后台 |
 
+## 初始化部署
+
+需要本机已有：
+
+- Python 3.11 及以上
+- Node.js 20 及以上
+- MySQL 8，字符集 `utf8mb4`
+- Redis
+
+建库（空库起步时）：
+
+```sql
+CREATE DATABASE navhub CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE USER 'nav'@'%' IDENTIFIED BY 'navpass';
+GRANT ALL ON navhub.* TO 'nav'@'%';
+```
+
+接口第一次启动会建表，并写入栏目、等级和目录种子。管理员账号来自下面的 `.env`。
+
+如果手里已有本地备份 `backups/nav-local.sql`，可以跳过空库种子，直接导入。这个文件包含 `navhub`（站点）和 `navproxy`（代理池），导入时会自己建库：
+
+```bash
+mysql -h 127.0.0.1 -P 3306 -u root -p --default-character-set=utf8mb4 < backups/nav-local.sql
+```
+
+备份本身不进 Git。需要重新导出时：
+
+```bash
+mysqldump -h 127.0.0.1 -P 3307 -u root --default-character-set=utf8mb4 --single-transaction --routines --triggers --set-gtid-purged=OFF --databases navhub navproxy --result-file=backups/nav-local.sql
+```
+
+端口按实际 MySQL 修改。导入后把 `backend/.env` 的 `DATABASE_URL` 指到这台库。
+
 ## 本地运行
 
 先启动 MySQL 和 Redis。数据库名 `navhub`，字符集 `utf8mb4`。
@@ -100,7 +133,7 @@ npm install
 | --- | --- | --- |
 | 资讯 | 2 分钟 | 每 5 分钟。只保留当天，过期行会删掉 |
 | GitHub 排行 | 20 分钟 | 每 24 小时。近 24 小时、周、月和总星标 |
-| 目录补齐 | 45 分钟 | 每 3 天。AI、跨境、午夜媒体、TG。库里已有的网址跳过 |
+| 目录补齐 | 45 分钟 | 每 2 天。每日资讯以外的栏目，包括其他分类。已有网址跳过 |
 
 目录来源是公开导航页，例如 AMZ123 的 AI 页、TT123、ThePornDude 的公开列表，以及 Telegram 公开目录。抓取会拒绝内网地址。
 
@@ -122,4 +155,10 @@ npm install
 
 ## 部署
 
-`deploy/nginx.conf` 把 `/` 转到前端，把 `/api` 转到接口。生产环境应关掉调试、更换密钥，并限制后台路径不要出现在公开页面上。
+按「初始化部署」装好 MySQL、Redis，导入 `backups/nav-local.sql` 或让接口首次启动建表。然后：
+
+1. 复制 `backend/.env.example` 为 `backend/.env`，改掉数据库地址、`SECRET_KEY`、管理员邮箱和密码。
+2. 按「本地运行」安装依赖并启动接口和前端，或在项目根目录执行 `docker compose up`。Compose 里的 MySQL 用户是 `nav` / `navpass`，映射本机 `3306`。已有 SQL 时，可先把备份导入 Compose 的 MySQL，再启动接口。
+3. `deploy/nginx.conf` 把 `/` 转到前端，把 `/api` 转到接口。
+
+生产环境应关掉调试、更换密钥，并限制后台路径不要出现在公开页面上。首页底部栏可以关掉，关掉后这次浏览不再显示，刷新页面会再出现。

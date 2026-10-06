@@ -60,6 +60,22 @@ async def lifespan(_app: FastAPI):
             conn.execute(text("ALTER TABLE links ADD COLUMN clicks_ready TINYINT(1) NOT NULL DEFAULT 0"))
         except Exception:
             pass
+        try:
+            conn.execute(text("ALTER TABLE users ADD COLUMN banned TINYINT(1) NOT NULL DEFAULT 0"))
+        except Exception:
+            pass
+        try:
+            conn.execute(text("ALTER TABLE users ADD COLUMN last_ip VARCHAR(64) NOT NULL DEFAULT ''"))
+        except Exception:
+            pass
+        try:
+            conn.execute(text("ALTER TABLE links ADD COLUMN review_note VARCHAR(200) NOT NULL DEFAULT ''"))
+        except Exception:
+            pass
+        try:
+            conn.execute(text("ALTER TABLE links ADD COLUMN client_ip VARCHAR(64) NOT NULL DEFAULT ''"))
+        except Exception:
+            pass
         conn.execute(text("UPDATE users SET email = LOWER(TRIM(email))"))
     db = SessionLocal()
     try:
@@ -70,6 +86,9 @@ async def lifespan(_app: FastAPI):
     schedule_daily()
     schedule_news()
     schedule_directory()
+    from app.review import sweep_open
+
+    sweep_open()
     yield
 
 

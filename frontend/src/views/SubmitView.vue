@@ -23,6 +23,7 @@ const categoryId = ref("");
 const title = ref("");
 const url = ref("");
 const logoUrl = ref("");
+const logoPreview = ref("");
 const description = ref("");
 const categories = computed(() => tree.value.find((item) => item.id === tabId.value)?.categories || []);
 
@@ -32,6 +33,10 @@ const proxyToken = ref("");
 const levelInfo = ref(null);
 const siteBoards = ref({ favorites: [], recommends: [] });
 const myMarks = ref([]);
+const submissions = ref([]);
+const submissionPage = ref(1);
+const submissionTotal = ref(0);
+const showForm = ref(false);
 const copied = ref("");
 const proxyLink = computed(() => proxyToken.value ? `${origin.value}/api/proxy/acquire?token=${encodeURIComponent(proxyToken.value)}` : "");
 
@@ -55,6 +60,7 @@ onMounted(async () => {
   siteBoards.value = rankRes.data;
   myMarks.value = markRes.data.items;
   proxyToken.value = tokenRes.data.token || "";
+  await loadSubmissions(1);
   ready.value = true;
   const [treeRes, adRes] = await Promise.all([
     http.get("/tree", { params: { locale: locale.value } }),
@@ -136,24 +142,67 @@ async function makeProxyToken() {
   proxyToken.value = data.token;
 }
 
+function rememberPreview(value) {
+  if (logoPreview.value.startsWith("blob:")) URL.revokeObjectURL(logoPreview.value);
+  logoPreview.value = value || "";
+}
+
+function onLogoTyping() {
+  if (!logoPreview.value.startsWith("blob:")) logoPreview.value = logoUrl.value;
+}
+
 async function uploadLogo(event) {
   const file = event.target.files?.[0];
   event.target.value = "";
   if (!file) return;
   notice.value = "";
+  rememberPreview(URL.createObjectURL(file));
   const body = new FormData();
   body.append("file", file);
   try {
     const { data } = await http.post("/uploads", body);
     logoUrl.value = data.url;
   } catch (err) {
+    rememberPreview("");
     const detail = err.response?.data?.detail;
     notice.value = detail ? t(detail) : t("authFailed");
   }
 }
 
+function reviewText(code) {
+  const zh = locale.value === "zh";
+  if (code === "duplicate") return zh ? "未通过：与站内已有链接重复，去掉协议和 www 后视为同一个网址" : "Rejected: this matches a link already in the directory, ignoring scheme and www.";
+  if (code === "unreachable") return zh ? "未通过：网址无法打开" : "Rejected: the site could not be opened.";
+  if (code === "opened") return zh ? "已通过：网址可以打开，已收录" : "Approved: the site opened and is now listed.";
+  return zh ? "审核中" : "In review";
+}
+
+async function loadSubmissions(page = submissionPage.value) {
+  const { data } = await http.get("/me/submissions", { params: { page, locale: locale.value } });
+  submissions.value = data.items;
+  submissionTotal.value = data.total;
+  submissionPage.value = data.page;
+}
+
+function openOut(url) {
+  window.open(url, "_blank", "noopener,noreferrer,width=1100,height=760");
+}
+
+function openHere(item) {
+  router.push({ path: "/", query: { link: item.id, tab: item.tab_id, cat: item.category_id } });
+}
+
+function initialOf(name) {
+  const text = (name || "").trim();
+  return text ? text.slice(0, 1).toUpperCase() : "?";
+}
+
 async function send() {
   notice.value = "";
+  if (!title.value.trim()) {
+    notice.value = t("nameRequired");
+    return;
+  }
   try {
     await http.post("/submissions", {
       category_id: categoryId.value,
@@ -168,8 +217,12 @@ async function send() {
     title.value = "";
     url.value = "";
     logoUrl.value = "";
+    rememberPreview("");
     description.value = "";
     notice.value = t("submitted");
+    showForm.value = false;
+    await loadSubmissions(1);
+    window.setTimeout(() => loadSubmissions(submissionPage.value), 5000);
   } catch (err) {
     notice.value = err.response?.data?.detail || t("authFailed");
   }
@@ -179,6 +232,7 @@ async function send() {
 <template>
   <div v-if="ready" class="account has-ads">
     <aside class="account-side">
+      <a class="side-brand" href="/"><img src="/logo.svg" alt="" />NEXA</a>
       <div class="account-who">
         <span class="avatar">{{ initial }}</span>
         <strong>{{ user.display_name || user.email }}</strong>
@@ -190,7 +244,7 @@ async function send() {
       <button type="button" :class="{ on: tab === 'marks' }" @click="tab = 'marks'">{{ locale === "zh" ? "收藏推荐" : "Saved" }}</button>
       <button type="button" :class="{ on: tab === 'submit' }" @click="tab = 'submit'">{{ t("submit") }}</button>
       <button type="button" :class="{ on: tab === 'proxy' }" @click="tab = 'proxy'">{{ t("proxyPool") }}</button>
-      <a href="/">NEXA</a>
+      <a href="/">{{ locale === "zh" ? "返回主页" : "Back to home" }}</a>
     </aside>
     <section class="page form" v-if="tab === 'profile'">
       <h1>{{ t("profile") }}</h1>
@@ -255,8 +309,15 @@ async function send() {
         </tbody>
       </table>
     </section>
-    <form v-else-if="tab === 'submit'" class="page form" @submit.prevent="send">
-      <h1>{{ t("submit") }}</h1>
+    <section v-else-if="tab === 'submit'" class="page form submit-panel">
+      <div class="section-head">
+        <div>
+          <h1>{{ t("submit") }}</h1>
+          <p class="meta">{{ locale === "zh" ? `共 ${submissionTotal} 条` : `${submissionTotal} total` }}</p>
+        </div>
+        <button type="button" class="primary" @click="showForm = !showForm">{{ showForm ? (locale === "zh" ? "收起" : "Close") : (locale === "zh" ? "提交链接" : "Submit a link") }}</button>
+      </div>
+      <form v-if="showForm" class="submit-form" @submit.prevent="send">
       <label>{{ locale === "zh" ? "一级栏目" : "Section" }}</label>
       <div class="pick-tabs">
         <button v-for="item in tree" :key="item.id" type="button" :class="{ on: item.id === tabId }" @click="pickTab(item.id)">{{ item.title }}</button>
@@ -265,17 +326,38 @@ async function send() {
       <div class="pick-cats">
         <button v-for="cat in categories" :key="cat.id" type="button" :class="{ on: cat.id === categoryId }" @click="categoryId = cat.id">{{ cat.title }}</button>
       </div>
-      <input v-model="title" :placeholder="t('linkName')" required />
+      <input v-model="title" :placeholder="t('linkName')" required maxlength="160" />
       <input v-model="url" :placeholder="t('linkUrl')" required />
       <div class="logo-row">
-        <img v-if="logoUrl" :src="logoUrl" alt="" referrerpolicy="no-referrer" />
-        <input v-model="logoUrl" :placeholder="t('logoUrl')" />
+        <img v-if="logoPreview || logoUrl" :src="logoPreview || logoUrl" alt="" />
+        <input v-model="logoUrl" :placeholder="t('logoUrl')" @input="onLogoTyping" />
         <label class="upload-btn">{{ t("uploadIcon") }}<input type="file" accept="image/*" @change="uploadLogo" /></label>
       </div>
       <textarea v-model="description" rows="4" :placeholder="t('linkDesc')"></textarea>
       <button class="primary" type="submit">{{ t("submit") }}</button>
+      </form>
       <p v-if="notice">{{ notice }}</p>
-    </form>
+      <h2>{{ locale === "zh" ? "提交记录" : "Submissions" }}</h2>
+      <p v-if="!submissions.length" class="meta">{{ locale === "zh" ? "还没有提交" : "No submissions yet" }}</p>
+      <div class="submit-log" v-for="item in submissions" :key="item.id">
+        <span class="submit-mark">
+          <img v-if="item.logo_url && !item.logoOff" :src="item.logo_url" alt="" @error="item.logoOff = true" />
+          <b v-else>{{ initialOf(item.title) }}</b>
+        </span>
+        <div class="submit-top">
+          <strong>{{ item.title }}</strong>
+          <button type="button" class="text-btn" :disabled="item.status !== 'published'" @click="openHere(item)">{{ locale === "zh" ? "本站查看" : "View here" }}</button>
+        </div>
+        <em :class="item.status === 'published' ? 'opened' : item.status === 'rejected' ? 'rejected' : 'reviewing'">{{ reviewText(item.note) }}</em>
+        <span class="submit-where">{{ item.tab }} · {{ item.category }}</span>
+        <button type="button" class="submit-url" @click="openOut(item.url)">{{ item.url }}</button>
+      </div>
+      <div v-if="submissionTotal > 10" class="pager">
+        <button type="button" :disabled="submissionPage <= 1" @click="loadSubmissions(submissionPage - 1)">{{ locale === "zh" ? "上一页" : "Prev" }}</button>
+        <span>{{ submissionPage }} / {{ Math.ceil(submissionTotal / 10) }}</span>
+        <button type="button" :disabled="submissionPage >= Math.ceil(submissionTotal / 10)" @click="loadSubmissions(submissionPage + 1)">{{ locale === "zh" ? "下一页" : "Next" }}</button>
+      </div>
+    </section>
     <section v-else-if="tab === 'proxy'" class="page form proxy-doc">
       <h1>{{ t("proxyPool") }}</h1>
       <p>{{ locale === "zh" ? `代理池是单独维护的服务。这里只给已登录用户发放调用令牌，令牌和登录会话无关。每次返回一个当前可用的 HTTP 代理。当前等级每分钟最多 ${levelInfo?.proxy_per_minute || 10} 次。` : `The proxy pool is a separate service. This page only issues a call token for signed-in users. The token is not your login session. Each call returns one working HTTP proxy. Your level allows ${levelInfo?.proxy_per_minute || 10} calls per minute.` }}</p>

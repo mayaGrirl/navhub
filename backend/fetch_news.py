@@ -23,7 +23,7 @@ FEEDS = [
     ("entertainment", "新浪娱乐", "https://rss.sina.com.cn/ent/hot_roll.xml"),
     ("sports", "新浪体育", "https://rss.sina.com.cn/sports/global/focus.xml"),
     ("society", "中国新闻网", "https://www.chinanews.com.cn/rss/scroll-news.xml"),
-    ("world", "联合早报", "https://www.zaobao.com/rss/realtime/china"),
+    ("world", "联合早报", "https://www.zaobao.com/rss/realtime/world"),
     ("world", "BBC World", "https://feeds.bbci.co.uk/news/world/rss.xml"),
     ("entertainment", "BBC Entertainment", "https://feeds.bbci.co.uk/news/entertainment_and_arts/rss.xml"),
     ("film", "Variety", "https://variety.com/feed/"),
@@ -34,13 +34,13 @@ FEEDS = [
     ("travel", "Conde Nast Traveler", "https://www.cntraveler.com/feed/rss"),
     ("food", "Bon Appetit", "https://www.bonappetit.com/feed/rss"),
     ("auto", "Car and Driver", "https://www.caranddriver.com/rss/all.xml/"),
-    ("house", "Guardian Money", "https://www.theguardian.com/money/rss"),
+    ("house", "Guardian Property", "https://www.theguardian.com/society/housing/rss"),
     ("fashion", "Harper's Bazaar", "https://www.harpersbazaar.com/rss/all.xml/"),
-    ("military", "BBC News", "https://feeds.bbci.co.uk/news/world/rss.xml"),
+    ("military", "Defense News", "https://www.defensenews.com/arc/outboundfeeds/rss/?outputType=xml"),
     ("games", "Polygon", "https://www.polygon.com/rss/index.xml"),
     ("science", "ScienceDaily", "https://www.sciencedaily.com/rss/all.xml"),
     ("digital", "The Verge", "https://www.theverge.com/rss/index.xml"),
-    ("ai-news", "Hacker News", "https://hnrss.org/frontpage"),
+    ("ai-news", "TechCrunch AI", "https://techcrunch.com/category/artificial-intelligence/feed/"),
     ("jobs", "Guardian Work", "https://www.theguardian.com/money/work-and-careers/rss"),
     ("startup", "TechCrunch", "https://techcrunch.com/feed/"),
     ("history", "History", "https://www.history.com/rss"),
@@ -48,7 +48,39 @@ FEEDS = [
     ("tech", "Hacker News", "https://hnrss.org/frontpage"),
     ("tech", "BBC Technology", "https://feeds.bbci.co.uk/news/technology/rss.xml"),
     ("tech", "The Verge", "https://www.theverge.com/rss/index.xml"),
+    ("society", "Google 新闻", "https://news.google.com/rss?hl=zh-CN&gl=CN&ceid=CN:zh-Hans"),
+    ("society", "Google News", "https://news.google.com/rss?hl=en-US&gl=US&ceid=US:en"),
+    ("world", "Google 国际", "https://news.google.com/rss/headlines/section/topic/WORLD?hl=zh-CN&gl=CN&ceid=CN:zh-Hans"),
+    ("world", "Google World", "https://news.google.com/rss/headlines/section/topic/WORLD?hl=en-US&gl=US&ceid=US:en"),
+    ("world", "卫报国际", "https://www.theguardian.com/world/rss"),
+    ("world", "半岛电视台", "https://www.aljazeera.com/xml/rss/all.xml"),
+    ("tech", "Google 科技", "https://news.google.com/rss/headlines/section/topic/TECHNOLOGY?hl=zh-CN&gl=CN&ceid=CN:zh-Hans"),
+    ("tech", "Google Technology", "https://news.google.com/rss/headlines/section/topic/TECHNOLOGY?hl=en-US&gl=US&ceid=US:en"),
+    ("tech", "36氪", "https://36kr.com/feed"),
+    ("tech", "Solidot", "https://www.solidot.org/index.rss"),
+    ("tech", "阮一峰", "http://www.ruanyifeng.com/blog/atom.xml"),
+    ("business", "Google 财经", "https://news.google.com/rss/headlines/section/topic/BUSINESS?hl=zh-CN&gl=CN&ceid=CN:zh-Hans"),
+    ("business", "Google Business", "https://news.google.com/rss/headlines/section/topic/BUSINESS?hl=en-US&gl=US&ceid=US:en"),
+    ("business", "纽约时报", "https://rss.nytimes.com/services/xml/rss/nyt/Business.xml"),
+    ("entertainment", "Google 娱乐", "https://news.google.com/rss/headlines/section/topic/ENTERTAINMENT?hl=zh-CN&gl=CN&ceid=CN:zh-Hans"),
+    ("entertainment", "Google Entertainment", "https://news.google.com/rss/headlines/section/topic/ENTERTAINMENT?hl=en-US&gl=US&ceid=US:en"),
+    ("sports", "Google 体育", "https://news.google.com/rss/headlines/section/topic/SPORTS?hl=zh-CN&gl=CN&ceid=CN:zh-Hans"),
+    ("sports", "Google Sports", "https://news.google.com/rss/headlines/section/topic/SPORTS?hl=en-US&gl=US&ceid=US:en"),
+    ("health", "Google 健康", "https://news.google.com/rss/headlines/section/topic/HEALTH?hl=zh-CN&gl=CN&ceid=CN:zh-Hans"),
+    ("health", "Google Health", "https://news.google.com/rss/headlines/section/topic/HEALTH?hl=en-US&gl=US&ceid=US:en"),
+    ("science", "Google 科学", "https://news.google.com/rss/headlines/section/topic/SCIENCE?hl=zh-CN&gl=CN&ceid=CN:zh-Hans"),
+    ("science", "Google Science", "https://news.google.com/rss/headlines/section/topic/SCIENCE?hl=en-US&gl=US&ceid=US:en"),
+    ("film", "Google 影视", "https://news.google.com/rss/search?q=电影+OR+音乐&hl=zh-CN&gl=CN&ceid=CN:zh-Hans"),
+    ("games", "Google 游戏", "https://news.google.com/rss/search?q=游戏+OR+电竞&hl=zh-CN&gl=CN&ceid=CN:zh-Hans"),
+    ("auto", "Google 汽车", "https://news.google.com/rss/search?q=汽车&hl=zh-CN&gl=CN&ceid=CN:zh-Hans"),
+    ("startup", "Google 创投", "https://news.google.com/rss/search?q=创业+OR+融资&hl=zh-CN&gl=CN&ceid=CN:zh-Hans"),
+    ("ai-news", "Google 人工智能", "https://news.google.com/rss/search?q=人工智能+OR+AI&hl=zh-CN&gl=CN&ceid=CN:zh-Hans"),
+    ("society", "百度新闻", "http://news.baidu.com/n?cmd=4&class=civilnews&tn=rss"),
+    ("tech", "百度科技", "http://news.baidu.com/n?cmd=4&class=technnews&tn=rss"),
 ]
+
+
+ATOM = "{http://www.w3.org/2005/Atom}"
 
 
 def node_text(node, name: str) -> str:
@@ -57,15 +89,44 @@ def node_text(node, name: str) -> str:
 
 
 def clean_url(url: str) -> str:
+    if "news.google.com" in url:
+        return url[:500]
     return url.split("?")[0][:500]
+
+
+def feed_entries(root):
+    items = list(root.iter("item"))
+    if items:
+        return items
+    return list(root.iter(f"{ATOM}entry"))
+
+
+def entry_link(item) -> str:
+    text = node_text(item, "link") or node_text(item, f"{ATOM}link")
+    if text:
+        return text
+    for name in ("link", f"{ATOM}link"):
+        for el in item.findall(name):
+            href = el.get("href")
+            if href:
+                return href
+    return ""
+
+
+def entry_title(item) -> str:
+    return node_text(item, "title") or node_text(item, f"{ATOM}title")
+
+
+def entry_date(item) -> str:
+    return node_text(item, "pubDate") or node_text(item, f"{ATOM}published") or node_text(item, f"{ATOM}updated")
 
 
 SHANGHAI = timezone(timedelta(hours=8))
 
 
 def today_start() -> datetime:
-    now = datetime.now(SHANGHAI)
-    return now.replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=None)
+    now = datetime.now(SHANGHAI).replace(tzinfo=None)
+    return now - timedelta(hours=24)
 
 
 def parse_date(value: str):
@@ -108,13 +169,13 @@ def main() -> None:
             except Exception as exc:
                 print("skip", source, exc.__class__.__name__)
                 continue
-            for item in list(root.iter("item"))[:12]:
-                link = clean_url(node_text(item, "link"))
-                title = node_text(item, "title")
+            for item in feed_entries(root)[:8]:
+                link = clean_url(entry_link(item))
+                title = entry_title(item)
                 if not link or not title or (category, link) in seen or db.scalar(select(NewsItem).where(NewsItem.url == link, NewsItem.category == category)):
                     continue
                 seen.add((category, link))
-                summary = node_text(item, "description")
+                summary = node_text(item, "description") or node_text(item, f"{ATOM}summary")
                 db.add(
                     NewsItem(
                         title=title[:300],
@@ -122,7 +183,7 @@ def main() -> None:
                         source=source,
                         category=category,
                         summary=summary[:400],
-                        published_at=parse_date(node_text(item, "pubDate")),
+                        published_at=parse_date(entry_date(item)) or datetime.now(SHANGHAI).replace(tzinfo=None),
                     )
                 )
                 added += 1

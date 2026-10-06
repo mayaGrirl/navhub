@@ -5,17 +5,24 @@ from pathlib import Path
 import secrets
 
 import httpx
-from fastapi import APIRouter, Depends, File, Header, HTTPException, Query, Response, UploadFile
-from sqlalchemy import or_, select
+from fastapi import APIRouter, Depends, File, Header, HTTPException, Query, Request, Response, UploadFile
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.deps import db_session, require_user
-from app.models import Ad, Announcement, Category, Level, Link, LinkMark, NewsItem, Page, PointRule, Tab, User
+from app.models import Ad, Announcement, Category, IpBan, Level, Link, LinkMark, NewsItem, Page, PointRule, Tab, User
 from app.urls import norm_url
 from app.security import month_key, plan_active, quota_for, rate_limit, rds
 
 router = APIRouter(prefix="/api", tags=["public"])
+
+
+def _client_ip(request: Request) -> str:
+    forwarded = request.headers.get("x-forwarded-for", "")
+    if forwarded:
+        return forwarded.split(",")[0].strip()[:64]
+    return (request.client.host if request.client else "")[:64]
 
 
 def _t(locale: str, en: str, zh: str) -> str:
@@ -379,7 +386,7 @@ async def upload_logo(file: UploadFile = File(...), user: User = Depends(require
 
 
 @router.post("/submissions")
-def submit(payload: dict, user: User = Depends(require_user), db: Session = Depends(db_session)):
+def submit(payload: dict, request: Request, user: User = Depends(require_user), db: Session = Depends(db_session)):
     plan = plan_active(user)
     if plan == "free" and user.plan == "vip":
         user.plan = "free"
@@ -392,34 +399,72 @@ def submit(payload: dict, user: User = Depends(require_user), db: Session = Depe
     category = db.get(Category, int(payload.get("category_id") or 0))
     if not category:
         raise HTTPException(status_code=400, detail="category required")
+    title = (payload.get("title") or payload.get("title_zh") or payload.get("title_en") or "").strip()
+    if not title:
+        raise HTTPException(status_code=400, detail="name required")
     link = Link(
         category_id=category.id,
-        title_en=payload.get("title_en") or payload.get("title") or "Untitled",
-        title_zh=payload.get("title_zh") or payload.get("title") or "未命名",
+        title_en=(payload.get("title_en") or title).strip(),
+        title_zh=(payload.get("title_zh") or title).strip(),
         description_en=payload.get("description_en") or payload.get("description") or "",
         description_zh=payload.get("description_zh") or payload.get("description") or "",
         url=payload.get("url") or "",
         logo_url=payload.get("logo_url") or "",
         attachment_url=payload.get("attachment_url") or "",
-        status="pending",
+        status="reviewing",
         source="user",
         submitter_id=user.id,
         vip_badge=plan == "vip",
-        favorite_count=__import__("random").randint(6, 96),
-        recommend_count=__import__("random").randint(2, 48),
-        click_count=__import__("random").randint(12, 240),
-        counts_ready=True,
-        clicks_ready=True,
+        client_ip=_client_ip(request),
     )
     if not link.url.startswith("http"):
         raise HTTPException(status_code=400, detail="url required")
     link.norm_url = norm_url(link.url)
-    if db.scalar(select(Link.id).where(Link.norm_url == link.norm_url)):
-        raise HTTPException(status_code=400, detail="link exists")
-    rule = db.get(PointRule, 1)
-    user.points = (user.points or 0) + (rule.points_per_link if rule else 1)
+    user.last_ip = link.client_ip
+    if user.banned or db.scalar(select(IpBan.id).where(IpBan.ip == link.client_ip)):
+        raise HTTPException(status_code=403, detail="banned")
     db.add(link)
     db.commit()
+    db.refresh(link)
     rds.incr(key)
     rds.expire(key, 60 * 60 * 24 * 40)
+    from app.review import schedule_review
+
+    schedule_review(link.id, user.id)
     return {"id": link.id, "status": link.status, "plan": plan, "used": used + 1, "limit": limit}
+
+
+@router.get("/me/submissions")
+def my_submissions(page: int = 1, locale: str = "en", user: User = Depends(require_user), db: Session = Depends(db_session)):
+    size = 10
+    page = max(page, 1)
+    total = db.scalar(select(func.count()).select_from(Link).where(Link.submitter_id == user.id)) or 0
+    rows = db.execute(
+        select(Link, Category, Tab)
+        .join(Category, Link.category_id == Category.id)
+        .join(Tab, Category.tab_id == Tab.id)
+        .where(Link.submitter_id == user.id)
+        .order_by(Link.id.desc())
+        .offset((page - 1) * size)
+        .limit(size)
+    ).all()
+    return {
+        "total": total,
+        "page": page,
+        "size": size,
+        "items": [
+            {
+                "id": link.id,
+                "title": link.title_zh or link.title_en,
+                "url": link.url,
+                "logo_url": link.logo_url or "",
+                "status": link.status,
+                "note": link.review_note or "",
+                "tab_id": tab.id,
+                "category_id": category.id,
+                "tab": _t(locale, tab.title_en, tab.title_zh),
+                "category": _t(locale, category.title_en, category.title_zh),
+            }
+            for link, category, tab in rows
+        ],
+    }

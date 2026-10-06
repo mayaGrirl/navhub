@@ -20,6 +20,8 @@ class User(Base):
     totp_secret: Mapped[str] = mapped_column(String(64), default="")
     totp_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     points: Mapped[int] = mapped_column(Integer, default=0)
+    banned: Mapped[bool] = mapped_column(Boolean, default=False)
+    last_ip: Mapped[str] = mapped_column(String(64), default="")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
@@ -69,6 +71,8 @@ class Link(Base):
     vip_badge: Mapped[bool] = mapped_column(Boolean, default=False)
     status: Mapped[str] = mapped_column(String(20), default="published")
     source: Mapped[str] = mapped_column(String(20), default="admin")
+    review_note: Mapped[str] = mapped_column(String(200), default="")
+    client_ip: Mapped[str] = mapped_column(String(64), default="")
     submitter_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     favorite_count: Mapped[int] = mapped_column(Integer, default=0)
     recommend_count: Mapped[int] = mapped_column(Integer, default=0)
@@ -93,6 +97,27 @@ class PointRule(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     points_per_link: Mapped[int] = mapped_column(Integer, default=1)
+
+
+class AdminAlert(Base):
+    __tablename__ = "admin_alerts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    email: Mapped[str] = mapped_column(String(255), default="")
+    ip: Mapped[str] = mapped_column(String(64), default="")
+    detail: Mapped[str] = mapped_column(String(300), default="")
+    handled: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class IpBan(Base):
+    __tablename__ = "ip_bans"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    ip: Mapped[str] = mapped_column(String(64), unique=True)
+    reason: Mapped[str] = mapped_column(String(200), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
 class LinkMark(Base):

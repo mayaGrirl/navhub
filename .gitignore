@@ -7,6 +7,7 @@ backend/.venv/
 .env
 backend/data/
 .local-mysql/
+backups/
 frontend/dist/
 frontend/public/uploads/
 .DS_Store

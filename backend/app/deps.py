@@ -24,6 +24,8 @@ def current_user(
 def require_user(user: User | None = Depends(current_user)) -> User:
     if not user:
         raise HTTPException(status_code=401, detail="login required")
+    if user.banned:
+        raise HTTPException(status_code=403, detail="banned")
     return user
 
 
