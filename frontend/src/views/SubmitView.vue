@@ -155,6 +155,11 @@ async function uploadLogo(event) {
   const file = event.target.files?.[0];
   event.target.value = "";
   if (!file) return;
+  const ok = ["image/png", "image/jpeg", "image/gif", "image/webp", "image/svg+xml"].includes(file.type) || /\.(png|jpe?g|gif|webp|svg)$/i.test(file.name);
+  if (!ok) {
+    notice.value = locale.value === "zh" ? "只支持 PNG、JPG、JPEG、GIF、WEBP、SVG" : "Use PNG, JPG, JPEG, GIF, WEBP, or SVG";
+    return;
+  }
   notice.value = "";
   rememberPreview(URL.createObjectURL(file));
   const body = new FormData();
@@ -185,7 +190,8 @@ async function loadSubmissions(page = submissionPage.value) {
 }
 
 function openOut(url) {
-  window.open(url, "_blank", "noopener,noreferrer,width=1100,height=760");
+  const opened = window.open(url, "_blank", "noopener,noreferrer");
+  if (opened) opened.opener = null;
 }
 
 function openHere(item) {
@@ -239,12 +245,14 @@ async function send() {
         <em>{{ user.email }}</em>
         <em v-if="levelInfo">Lv.{{ levelInfo.level }} · {{ levelInfo.points }} {{ locale === "zh" ? "积分" : "pts" }}</em>
       </div>
-      <button type="button" :class="{ on: tab === 'profile' }" @click="tab = 'profile'">{{ t("profile") }}</button>
-      <button type="button" :class="{ on: tab === 'levels' }" @click="tab = 'levels'">{{ locale === "zh" ? "等级规则" : "Levels" }}</button>
-      <button type="button" :class="{ on: tab === 'marks' }" @click="tab = 'marks'">{{ locale === "zh" ? "收藏推荐" : "Saved" }}</button>
-      <button type="button" :class="{ on: tab === 'submit' }" @click="tab = 'submit'">{{ t("submit") }}</button>
-      <button type="button" :class="{ on: tab === 'proxy' }" @click="tab = 'proxy'">{{ t("proxyPool") }}</button>
-      <a href="/">{{ locale === "zh" ? "返回主页" : "Back to home" }}</a>
+      <nav class="account-nav">
+        <button type="button" :class="{ on: tab === 'profile' }" @click="tab = 'profile'">{{ t("profile") }}</button>
+        <button type="button" :class="{ on: tab === 'levels' }" @click="tab = 'levels'">{{ locale === "zh" ? "等级规则" : "Levels" }}</button>
+        <button type="button" :class="{ on: tab === 'marks' }" @click="tab = 'marks'">{{ locale === "zh" ? "收藏推荐" : "Saved" }}</button>
+        <button type="button" :class="{ on: tab === 'submit' }" @click="tab = 'submit'">{{ t("submit") }}</button>
+        <button type="button" :class="{ on: tab === 'proxy' }" @click="tab = 'proxy'">{{ t("proxyPool") }}</button>
+        <a href="/">{{ locale === "zh" ? "返回主页" : "Back to home" }}</a>
+      </nav>
     </aside>
     <section class="page form" v-if="tab === 'profile'">
       <h1>{{ t("profile") }}</h1>
@@ -266,7 +274,7 @@ async function send() {
       <div class="mark-list">
         <div class="mine-row" v-for="(item, index) in myMarks.filter((row) => row.kind === 'favorite')" :key="'f' + item.id">
           <a class="mark-chip" :href="item.url" target="_blank" rel="noreferrer">
-            <img :src="logoOf(item)" alt="" referrerpolicy="no-referrer" @error="$event.target.src = siteIcon(item.url)" />
+            <img :src="logoOf(item)" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" @error="$event.target.src = siteIcon(item.url)" />
             <span class="name">{{ item.title }}</span>
             <b>{{ item.favorite_count }}</b>
           </a>
@@ -278,7 +286,7 @@ async function send() {
       <div class="mark-list">
         <div class="mine-row" v-for="(item, index) in myMarks.filter((row) => row.kind === 'recommend')" :key="'r' + item.id">
           <a class="mark-chip" :href="item.url" target="_blank" rel="noreferrer">
-            <img :src="logoOf(item)" alt="" referrerpolicy="no-referrer" @error="$event.target.src = siteIcon(item.url)" />
+            <img :src="logoOf(item)" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" @error="$event.target.src = siteIcon(item.url)" />
             <span class="name">{{ item.title }}</span>
             <b>{{ item.recommend_count }}</b>
           </a>
@@ -331,8 +339,9 @@ async function send() {
       <div class="logo-row">
         <img v-if="logoPreview || logoUrl" :src="logoPreview || logoUrl" alt="" />
         <input v-model="logoUrl" :placeholder="t('logoUrl')" @input="onLogoTyping" />
-        <label class="upload-btn">{{ t("uploadIcon") }}<input type="file" accept="image/*" @change="uploadLogo" /></label>
+        <label class="upload-btn">{{ t("uploadIcon") }}<input type="file" accept=".png,.jpg,.jpeg,.gif,.webp,.svg,image/png,image/jpeg,image/gif,image/webp,image/svg+xml" @change="uploadLogo" /></label>
       </div>
+      <p class="meta">{{ locale === "zh" ? "本地上传支持格式：PNG、JPG、JPEG、GIF、WEBP、SVG" : "Local upload accepts: PNG, JPG, JPEG, GIF, WEBP, SVG" }}</p>
       <textarea v-model="description" rows="4" :placeholder="t('linkDesc')"></textarea>
       <button class="primary" type="submit">{{ t("submit") }}</button>
       </form>
@@ -341,7 +350,7 @@ async function send() {
       <p v-if="!submissions.length" class="meta">{{ locale === "zh" ? "还没有提交" : "No submissions yet" }}</p>
       <div class="submit-log" v-for="item in submissions" :key="item.id">
         <span class="submit-mark">
-          <img v-if="item.logo_url && !item.logoOff" :src="item.logo_url" alt="" @error="item.logoOff = true" />
+          <img v-if="item.logo_url && !item.logoOff" :src="item.logo_url" alt="" loading="lazy" decoding="async" @error="item.logoOff = true" />
           <b v-else>{{ initialOf(item.title) }}</b>
         </span>
         <div class="submit-top">
@@ -387,7 +396,7 @@ curl -x http://1.2.3.4:8080 https://example.com</pre>
         <h2><svg class="board-icon" viewBox="0 0 24 24"><path d="M12 21s-6.7-4.3-9.3-8.2C.6 10.1 1.2 6.6 4.2 5.2 6.3 4.2 8.6 4.8 10 6.4L12 8.7l2-2.3c1.4-1.6 3.7-2.2 5.8-1.2 3 1.4 3.6 4.9 1.5 7.6C18.7 16.7 12 21 12 21z"/></svg>{{ locale === "zh" ? "收藏榜" : "Favorites" }}</h2>
         <div class="mark-list">
           <a class="mark-chip" v-for="(item, index) in siteBoards.favorites" :key="'f' + item.id" :href="item.url" target="_blank" rel="noreferrer">
-            <img :src="logoOf(item)" alt="" referrerpolicy="no-referrer" @error="$event.target.src = siteIcon(item.url)" />
+            <img :src="logoOf(item)" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" @error="$event.target.src = siteIcon(item.url)" />
             <span class="name">{{ item.title }}</span>
             <b>{{ item.count }}</b>
           </a>
@@ -395,14 +404,14 @@ curl -x http://1.2.3.4:8080 https://example.com</pre>
         <p v-if="!siteBoards.favorites.length" class="meta">{{ locale === "zh" ? "还没有收藏" : "No favorites yet" }}</p>
       </section>
       <a v-if="ads[0]" :href="ads[0].link_url || undefined" target="_blank" rel="noopener">
-        <img v-if="ads[0].image_url" :src="ads[0].image_url" :alt="ads[0].title" />
+        <img v-if="ads[0].image_url" :src="ads[0].image_url" :alt="ads[0].title" loading="lazy" decoding="async" />
         <span>{{ ads[0].title }}</span>
       </a>
       <section>
         <h2><svg class="board-icon" viewBox="0 0 24 24"><path d="M8 10V21H4V10h4zm2.2 11c-.7 0-1.3-.2-1.8-.7-.4-.4-.6-.9-.6-1.5V10.2c0-.3.1-.6.3-.9l4.6-5.8c.3-.4.8-.6 1.3-.5.6.1 1 .6 1 1.2v4.3h4.4c.8 0 1.5.6 1.6 1.4l.8 5.4c.1.8-.2 1.6-.8 2.1-.5.5-1.2.8-1.9.8H10.2z"/></svg>{{ locale === "zh" ? "推荐榜" : "Recommendations" }}</h2>
         <div class="mark-list">
           <a class="mark-chip" v-for="(item, index) in siteBoards.recommends" :key="'r' + item.id" :href="item.url" target="_blank" rel="noreferrer">
-            <img :src="logoOf(item)" alt="" referrerpolicy="no-referrer" @error="$event.target.src = siteIcon(item.url)" />
+            <img :src="logoOf(item)" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" @error="$event.target.src = siteIcon(item.url)" />
             <span class="name">{{ item.title }}</span>
             <b>{{ item.count }}</b>
           </a>
@@ -410,7 +419,7 @@ curl -x http://1.2.3.4:8080 https://example.com</pre>
         <p v-if="!siteBoards.recommends.length" class="meta">{{ locale === "zh" ? "还没有推荐" : "No recommendations yet" }}</p>
       </section>
       <a v-for="ad in ads.slice(1)" :key="ad.id" :href="ad.link_url || undefined" target="_blank" rel="noopener">
-        <img v-if="ad.image_url" :src="ad.image_url" :alt="ad.title" />
+        <img v-if="ad.image_url" :src="ad.image_url" :alt="ad.title" loading="lazy" decoding="async" />
         <span>{{ ad.title }}</span>
       </a>
     </aside>

@@ -76,6 +76,10 @@ async def lifespan(_app: FastAPI):
             conn.execute(text("ALTER TABLE links ADD COLUMN client_ip VARCHAR(64) NOT NULL DEFAULT ''"))
         except Exception:
             pass
+        try:
+            conn.execute(text("ALTER TABLE links ADD COLUMN points_awarded TINYINT(1) NOT NULL DEFAULT 0"))
+        except Exception:
+            pass
         conn.execute(text("UPDATE users SET email = LOWER(TRIM(email))"))
     db = SessionLocal()
     try:

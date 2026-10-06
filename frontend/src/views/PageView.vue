@@ -41,7 +41,7 @@ onMounted(load);
     </article>
     <aside v-if="ads.length" class="doc-ads">
       <a v-for="ad in ads" :key="ad.id" :href="ad.link_url || undefined" target="_blank" rel="noopener">
-        <img v-if="ad.image_url" :src="ad.image_url" :alt="ad.title" />
+        <img v-if="ad.image_url" :src="ad.image_url" :alt="ad.title" loading="lazy" decoding="async" />
         <span>{{ ad.title }}</span>
       </a>
     </aside>

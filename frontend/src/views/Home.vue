@@ -26,14 +26,14 @@ const siteQuery = ref("");
 const siteHits = ref([]);
 const spotlight = ref(null);
 const siteWhere = ref("");
-const engine = ref("baidu");
+const engine = ref("google");
 const engineGroups = [
   {
     zh: "网页",
     en: "Web",
     items: [
-      { id: "baidu", zh: "百度", en: "Baidu" },
       { id: "google", zh: "Google", en: "Google" },
+      { id: "baidu", zh: "百度", en: "Baidu" },
       { id: "bing", zh: "Bing", en: "Bing" },
       { id: "sogou", zh: "搜狗", en: "Sogou" },
       { id: "so360", zh: "360", en: "360" },
@@ -321,7 +321,7 @@ async function searchWeb() {
   const encoded = encodeURIComponent(text);
   const urls = {
     baidu: `https://www.baidu.com/s?wd=${encoded}`,
-    google: `https://www.google.com/search?q=${encoded}`,
+    google: `https://www.google.com/search?q=${encoded}&hl=${locale.value === "zh" ? "zh-CN" : "en"}&lr=${locale.value === "zh" ? "lang_zh-CN" : "lang_en"}`,
     bing: `https://www.bing.com/search?q=${encoded}`,
     sogou: `https://www.sogou.com/web?query=${encoded}`,
     so360: `https://www.so.com/s?q=${encoded}`,
@@ -355,7 +355,7 @@ async function searchWeb() {
     creepjs: "https://abrahamjuliot.github.io/creepjs/",
     amiunique: "https://amiunique.org/",
   };
-  window.open(urls[engine.value] || urls.baidu, "_blank", "noopener");
+  window.open(urls[engine.value] || urls.google, "_blank", "noopener");
 }
 
 let siteTimer = 0;
@@ -510,7 +510,7 @@ onUnmounted(() => {
             target="_blank"
             rel="noopener"
           >
-            <img v-if="ad.image_url" :src="ad.image_url" :alt="ad.title" />
+            <img v-if="ad.image_url" :src="ad.image_url" :alt="ad.title" loading="lazy" decoding="async" />
             <span>{{ ad.title }}</span>
           </a>
           <div v-if="bannerAds.length > 1" class="dots">
@@ -566,7 +566,7 @@ onUnmounted(() => {
             </a>
           </section>
           <a v-if="feedAdAt(index)" class="feed-ad" :href="feedAdAt(index).link_url || undefined" target="_blank" rel="noopener">
-            <img v-if="feedAdAt(index).image_url" :src="feedAdAt(index).image_url" :alt="feedAdAt(index).title" />
+            <img v-if="feedAdAt(index).image_url" :src="feedAdAt(index).image_url" :alt="feedAdAt(index).title" loading="lazy" decoding="async" />
             <span>{{ feedAdAt(index).title }}</span>
           </a>
           </template>
@@ -578,7 +578,7 @@ onUnmounted(() => {
             <h2>{{ section.title }}</h2>
             <div class="grid">
               <a class="card" :id="`link-${link.id}`" :class="{ spot: spotlight === link.id }" v-for="link in section.links" :key="link.id" :href="link.url" target="_blank" rel="noreferrer" @click="countClick(link)">
-                <img class="logo" :src="logoOf(link)" alt="" referrerpolicy="no-referrer" @error="useFallback($event, link)" />
+                <img class="logo" :src="logoOf(link)" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" @error="useFallback($event, link)" />
                 <div>
                   <div class="card-head">
                     <h3>{{ link.title }}</h3>
@@ -599,7 +599,7 @@ onUnmounted(() => {
             </div>
           </section>
           <a v-if="feedAdAt(index)" class="feed-ad" :href="feedAdAt(index).link_url || undefined" target="_blank" rel="noopener">
-            <img v-if="feedAdAt(index).image_url" :src="feedAdAt(index).image_url" :alt="feedAdAt(index).title" />
+            <img v-if="feedAdAt(index).image_url" :src="feedAdAt(index).image_url" :alt="feedAdAt(index).title" loading="lazy" decoding="async" />
             <span>{{ feedAdAt(index).title }}</span>
           </a>
           </template>
@@ -626,7 +626,7 @@ onUnmounted(() => {
           </a>
           <div v-if="growthAds.length" class="slot-ads">
             <a v-for="ad in growthAds" :key="ad.id" :href="ad.link_url || undefined" target="_blank" rel="noopener">
-              <img v-if="ad.image_url" :src="ad.image_url" :alt="ad.title" />
+              <img v-if="ad.image_url" :src="ad.image_url" :alt="ad.title" loading="lazy" decoding="async" />
               <span>{{ ad.title }}</span>
             </a>
           </div>
@@ -645,7 +645,7 @@ onUnmounted(() => {
           </a>
           <div v-if="totalAds.length" class="slot-ads">
             <a v-for="ad in totalAds" :key="ad.id" :href="ad.link_url || undefined" target="_blank" rel="noopener">
-              <img v-if="ad.image_url" :src="ad.image_url" :alt="ad.title" />
+              <img v-if="ad.image_url" :src="ad.image_url" :alt="ad.title" loading="lazy" decoding="async" />
               <span>{{ ad.title }}</span>
             </a>
           </div>
@@ -654,7 +654,7 @@ onUnmounted(() => {
           <h2><svg class="board-icon" viewBox="0 0 24 24"><path d="M12 21s-6.7-4.3-9.3-8.2C.6 10.1 1.2 6.6 4.2 5.2 6.3 4.2 8.6 4.8 10 6.4L12 8.7l2-2.3c1.4-1.6 3.7-2.2 5.8-1.2 3 1.4 3.6 4.9 1.5 7.6C18.7 16.7 12 21 12 21z"/></svg>{{ locale === "zh" ? "收藏榜" : "Favorites" }}</h2>
           <div class="mark-list">
             <a class="mark-chip" v-for="(item, index) in siteBoards.favorites" :key="'f' + item.id" :href="item.url" target="_blank" rel="noreferrer">
-              <img :src="logoOf(item)" alt="" referrerpolicy="no-referrer" @error="useFallback($event, item)" />
+              <img :src="logoOf(item)" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" @error="useFallback($event, item)" />
               <span class="name">{{ item.title }}</span>
               <b>{{ item.count }}</b>
             </a>
@@ -665,7 +665,7 @@ onUnmounted(() => {
           <h2><svg class="board-icon" viewBox="0 0 24 24"><path d="M8 10V21H4V10h4zm2.2 11c-.7 0-1.3-.2-1.8-.7-.4-.4-.6-.9-.6-1.5V10.2c0-.3.1-.6.3-.9l4.6-5.8c.3-.4.8-.6 1.3-.5.6.1 1 .6 1 1.2v4.3h4.4c.8 0 1.5.6 1.6 1.4l.8 5.4c.1.8-.2 1.6-.8 2.1-.5.5-1.2.8-1.9.8H10.2z"/></svg>{{ locale === "zh" ? "推荐榜" : "Recommendations" }}</h2>
           <div class="mark-list">
             <a class="mark-chip" v-for="(item, index) in siteBoards.recommends" :key="'r' + item.id" :href="item.url" target="_blank" rel="noreferrer">
-              <img :src="logoOf(item)" alt="" referrerpolicy="no-referrer" @error="useFallback($event, item)" />
+              <img :src="logoOf(item)" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" @error="useFallback($event, item)" />
               <span class="name">{{ item.title }}</span>
               <b>{{ item.count }}</b>
             </a>
@@ -676,7 +676,7 @@ onUnmounted(() => {
           <h2><svg class="board-icon" viewBox="0 0 24 24"><path d="M6 3.2v13.2l3.6-2.6 2.1 4.8 2-0.9-2.1-4.8H18L6 3.2z"/></svg>{{ locale === "zh" ? "点击榜" : "Clicks" }}</h2>
           <div class="mark-list">
             <a class="mark-chip" v-for="item in siteBoards.clicks" :key="'c' + item.id" :href="item.url" target="_blank" rel="noreferrer" @click="countClick(item)">
-              <img :src="logoOf(item)" alt="" referrerpolicy="no-referrer" @error="useFallback($event, item)" />
+              <img :src="logoOf(item)" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" @error="useFallback($event, item)" />
               <span class="name">{{ item.title }}</span>
               <b>{{ item.count }}</b>
             </a>
@@ -716,7 +716,7 @@ onUnmounted(() => {
         </div>
       </div>
       <a v-if="footerAds.length" class="foot-ad" :href="footerAds[0].link_url || undefined" target="_blank" rel="noopener">
-        <img v-if="footerAds[0].image_url" :src="footerAds[0].image_url" :alt="footerAds[0].title" />
+        <img v-if="footerAds[0].image_url" :src="footerAds[0].image_url" :alt="footerAds[0].title" loading="lazy" decoding="async" />
       </a>
     </footer>
   </div>

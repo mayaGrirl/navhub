@@ -73,6 +73,7 @@ class Link(Base):
     source: Mapped[str] = mapped_column(String(20), default="admin")
     review_note: Mapped[str] = mapped_column(String(200), default="")
     client_ip: Mapped[str] = mapped_column(String(64), default="")
+    points_awarded: Mapped[bool] = mapped_column(Boolean, default=False)
     submitter_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
     favorite_count: Mapped[int] = mapped_column(Integer, default=0)
     recommend_count: Mapped[int] = mapped_column(Integer, default=0)

@@ -1,8 +1,6 @@
 import { createApp } from "vue";
 import { createPinia } from "pinia";
 import { createI18n } from "vue-i18n";
-import ElementPlus from "element-plus";
-import "element-plus/dist/index.css";
 import App from "./App.vue";
 import router from "./router";
 import "./style.css";
@@ -140,4 +138,4 @@ const i18n = createI18n({
   },
 });
 
-createApp(App).use(createPinia()).use(router).use(i18n).use(ElementPlus).mount("#app");
+createApp(App).use(createPinia()).use(router).use(i18n).mount("#app");

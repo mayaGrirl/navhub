@@ -59,8 +59,14 @@ def _run(link_id: int, user_id: int) -> None:
             link.review_note = "unreachable"
             db.commit()
             return
+        if link.points_awarded:
+            link.status = "published"
+            link.review_note = "opened"
+            db.commit()
+            return
         rule = db.get(PointRule, 1)
         user.points = (user.points or 0) + (rule.points_per_link if rule else 1)
+        link.points_awarded = True
         link.status = "published"
         link.review_note = "opened"
         link.favorite_count = random.randint(6, 96)
