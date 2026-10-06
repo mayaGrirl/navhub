@@ -16,6 +16,10 @@ const contact = ref(null);
 const about = ref(null);
 const ads = ref([]);
 const mode = computed(() => (route.path === "/register" || props.mode === "register" ? "register" : "login"));
+const captchaId = ref("");
+const captchaProgress = ref(0);
+const dragging = ref(false);
+const slid = computed(() => captchaProgress.value >= 96);
 
 const telegram = computed(() => {
   const raw = (contact.value?.im || "").trim();
@@ -41,18 +45,54 @@ async function load() {
   ads.value = adRes.data.filter((item) => slots.includes(item.slot));
 }
 
+async function loadCaptcha() {
+  captchaId.value = "";
+  captchaProgress.value = 0;
+  if (mode.value !== "register") return;
+  const { data } = await http.post("/auth/captcha");
+  captchaId.value = data.id;
+}
+
+function dragStart(event) {
+  dragging.value = true;
+  event.currentTarget.setPointerCapture(event.pointerId);
+}
+
+function dragMove(event) {
+  if (!dragging.value || slid.value) return;
+  const track = event.currentTarget.parentElement.getBoundingClientRect();
+  const ratio = (event.clientX - track.left) / track.width;
+  captchaProgress.value = Math.max(0, Math.min(100, Math.round(ratio * 100)));
+}
+
+function dragEnd() {
+  dragging.value = false;
+  if (captchaProgress.value < 96) captchaProgress.value = 0;
+}
+
 watch(locale, load);
-onMounted(load);
+watch(mode, loadCaptcha);
+onMounted(() => {
+  load();
+  loadCaptcha();
+});
 
 async function send() {
   error.value = "";
   try {
     const path = mode.value === "register" ? "/auth/register" : "/auth/login";
-    await http.post(path, { email: email.value, password: password.value, totp: totp.value });
+    await http.post(path, {
+      email: email.value,
+      password: password.value,
+      totp: totp.value,
+      captcha_id: captchaId.value,
+      captcha_progress: captchaProgress.value,
+    });
     router.push("/");
   } catch (err) {
     const detail = err.response?.data?.detail;
     error.value = detail ? t(detail) : t("authFailed");
+    if (mode.value === "register") loadCaptcha();
   }
 }
 </script>
@@ -68,6 +108,15 @@ async function send() {
       <h1>{{ mode === "register" ? t("register") : t("login") }}</h1>
       <input v-model="email" type="email" :placeholder="t('email')" required />
       <input v-model="password" type="password" :placeholder="t('password')" required />
+      <div
+        v-if="mode === 'register'"
+        class="slide"
+        :class="{ ok: slid }"
+      >
+        <span class="slide-fill" :style="{ width: captchaProgress + '%' }"></span>
+        <em>{{ slid ? t("slid") : t("slide") }}</em>
+        <button class="slide-knob" type="button" :style="{ left: captchaProgress + '%' }" @pointerdown="dragStart" @pointermove="dragMove" @pointerup="dragEnd" @pointercancel="dragEnd">›</button>
+      </div>
       <input v-if="mode === 'login'" v-model="totp" :placeholder="t('totp')" />
       <button class="primary" type="submit">{{ mode === "register" ? t("createAccount") : t("login") }}</button>
       <p v-if="error">{{ error }}</p>

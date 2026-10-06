@@ -2,6 +2,8 @@ import hashlib
 import secrets
 from datetime import datetime, timedelta
 
+import time
+
 import pyotp
 import redis
 
@@ -103,6 +105,27 @@ def record_failure(email: str) -> None:
         rds.expire(key, 900)
     if count >= 5:
         rds.setex(f"lock:{email}", 900, "1")
+
+
+def issue_captcha() -> str:
+    token = secrets.token_urlsafe(18)
+    rds.setex(f"captcha:{token}", 120, str(time.time()))
+    return token
+
+
+def take_captcha(token: str, progress: int) -> bool:
+    if not token:
+        return False
+    key = f"captcha:{token}"
+    raw = rds.get(key)
+    if not raw:
+        return False
+    rds.delete(key)
+    try:
+        elapsed = time.time() - float(raw)
+    except ValueError:
+        return False
+    return 0.45 <= elapsed <= 120 and progress >= 96
 
 
 def clear_failure(email: str) -> None:

@@ -356,7 +356,7 @@ onUnmounted(() => clearInterval(bannerTimer));
         <p v-else-if="siteWhere === 'top' && siteQuery.trim()" class="site-hits empty">{{ locale === "zh" ? "没有匹配的链接" : "No matching links" }}</p>
       </div>
       <div class="nav-links">
-        <a v-if="user" href="/submit">{{ t("submit") }}</a>
+        <a v-if="user" href="/submit">{{ t("center") }}</a>
         <button class="text-btn" @click="setLocale(locale === 'en' ? 'zh' : 'en')">{{ locale === "en" ? "中文" : "EN" }}</button>
         <a v-if="!user" href="/login">{{ t("login") }}</a>
         <button v-else class="text-btn" @click="logout">{{ t("logout") }}</button>

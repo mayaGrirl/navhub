@@ -1,6 +1,7 @@
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from sqlalchemy import text
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
@@ -15,6 +16,12 @@ from app.seed import seed
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     Base.metadata.create_all(engine)
+    with engine.begin() as conn:
+        try:
+            conn.execute(text("ALTER TABLE users ADD COLUMN display_name VARCHAR(80) NOT NULL DEFAULT ''"))
+        except Exception:
+            pass
+        conn.execute(text("UPDATE users SET email = LOWER(TRIM(email))"))
     db = SessionLocal()
     try:
         gate = seed(db)

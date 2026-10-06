@@ -1,63 +1,141 @@
 <script setup>
-import { onMounted, ref } from "vue";
+import { computed, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
+import { useI18n } from "vue-i18n";
 import http from "../api";
 
 const router = useRouter();
+const { locale, t } = useI18n();
 const ready = ref(false);
+const tab = ref("profile");
+const user = ref(null);
+const name = ref("");
+const notice = ref("");
+const currentPassword = ref("");
+const newPassword = ref("");
+const confirmPassword = ref("");
 
+const ads = ref([]);
 const tree = ref([]);
 const categoryId = ref("");
 const title = ref("");
 const url = ref("");
 const description = ref("");
-const message = ref("");
+
+const initial = computed(() => (name.value || user.value?.email || "?").slice(0, 1).toUpperCase());
 
 onMounted(async () => {
   try {
-    await http.get("/auth/me");
+    const { data } = await http.get("/auth/me");
+    user.value = data;
+    name.value = data.display_name || "";
   } catch {
     router.replace("/login");
     return;
   }
   ready.value = true;
-  const { data } = await http.get("/tree");
-  tree.value = data.filter((tab) => tab.kind === "links");
+  const [treeRes, adRes] = await Promise.all([
+    http.get("/tree", { params: { locale: locale.value } }),
+    http.get("/ads", { params: { locale: locale.value } }),
+  ]);
+  const data = treeRes.data;
+  ads.value = adRes.data.filter((item) => item.slot === "account-1" || item.slot === "account-2");
+  tree.value = data.filter((item) => item.kind === "links");
   categoryId.value = tree.value[0]?.categories[0]?.id || "";
 });
 
-async function send() {
-  message.value = "";
+async function saveProfile() {
+  notice.value = "";
+  const { data } = await http.patch("/auth/profile", { display_name: name.value });
+  user.value.display_name = data.display_name;
+  notice.value = t("saved");
+}
+
+async function savePassword() {
+  notice.value = "";
+  if (newPassword.value !== confirmPassword.value) {
+    notice.value = t("passwordMismatch");
+    return;
+  }
   try {
-    const { data } = await http.post("/submissions", {
+    await http.post("/auth/password", { current_password: currentPassword.value, new_password: newPassword.value });
+    currentPassword.value = "";
+    newPassword.value = "";
+    confirmPassword.value = "";
+    notice.value = t("passwordChanged");
+  } catch (err) {
+    const detail = err.response?.data?.detail;
+    notice.value = detail ? t(detail) : t("authFailed");
+  }
+}
+
+async function send() {
+  notice.value = "";
+  try {
+    await http.post("/submissions", {
       category_id: categoryId.value,
-      title,
+      title: title.value,
       title_en: title.value,
       title_zh: title.value,
       url: url.value,
       description_en: description.value,
       description_zh: description.value,
     });
-    message.value = `Submitted for review. ${data.used}/${data.limit} this month.`;
+    title.value = "";
+    url.value = "";
+    description.value = "";
+    notice.value = t("submitted");
   } catch (err) {
-    message.value = err.response?.data?.detail || "failed";
+    notice.value = err.response?.data?.detail || t("authFailed");
   }
 }
 </script>
 
 <template>
-  <form v-if="ready" class="page form" @submit.prevent="send">
-    <p><a href="/">NEXA</a></p>
-    <h1>Submit a link</h1>
-    <select v-model="categoryId">
-      <optgroup v-for="tab in tree" :key="tab.id" :label="tab.title">
-        <option v-for="cat in tab.categories" :key="cat.id" :value="cat.id">{{ cat.title }}</option>
-      </optgroup>
-    </select>
-    <input v-model="title" placeholder="Name" required />
-    <input v-model="url" placeholder="https://" required />
-    <textarea v-model="description" rows="4" placeholder="Short description"></textarea>
-    <button class="primary" type="submit">Submit</button>
-    <p>{{ message }}</p>
-  </form>
+  <div v-if="ready" class="account" :class="{ 'has-ads': ads.length }">
+    <aside class="account-side">
+      <div class="account-who">
+        <span class="avatar">{{ initial }}</span>
+        <strong>{{ user.display_name || user.email }}</strong>
+        <em>{{ user.email }}</em>
+      </div>
+      <button type="button" :class="{ on: tab === 'profile' }" @click="tab = 'profile'">{{ t("profile") }}</button>
+      <button type="button" :class="{ on: tab === 'submit' }" @click="tab = 'submit'">{{ t("submit") }}</button>
+      <a href="/">NEXA</a>
+    </aside>
+    <section class="page form" v-if="tab === 'profile'">
+      <h1>{{ t("profile") }}</h1>
+      <label>{{ t("email") }}</label>
+      <input :value="user.email" readonly />
+      <label>{{ t("nickname") }}</label>
+      <input v-model="name" maxlength="40" :placeholder="t('nickname')" />
+      <button class="primary" type="button" @click="saveProfile">{{ t("save") }}</button>
+      <h2>{{ t("password") }}</h2>
+      <input v-model="currentPassword" type="password" :placeholder="t('currentPassword')" autocomplete="current-password" />
+      <input v-model="newPassword" type="password" :placeholder="t('newPassword')" autocomplete="new-password" />
+      <input v-model="confirmPassword" type="password" :placeholder="t('confirmPassword')" autocomplete="new-password" />
+      <button class="primary" type="button" @click="savePassword">{{ t("save") }}</button>
+      <p v-if="notice">{{ notice }}</p>
+    </section>
+    <form v-else class="page form" @submit.prevent="send">
+      <h1>{{ t("submit") }}</h1>
+      <label>{{ t("category") }}</label>
+      <select v-model="categoryId">
+        <optgroup v-for="item in tree" :key="item.id" :label="item.title">
+          <option v-for="cat in item.categories" :key="cat.id" :value="cat.id">{{ cat.title }}</option>
+        </optgroup>
+      </select>
+      <input v-model="title" :placeholder="t('linkName')" required />
+      <input v-model="url" :placeholder="t('linkUrl')" required />
+      <textarea v-model="description" rows="4" :placeholder="t('linkDesc')"></textarea>
+      <button class="primary" type="submit">{{ t("submit") }}</button>
+      <p v-if="notice">{{ notice }}</p>
+    </form>
+    <aside v-if="ads.length" class="account-ads">
+      <a v-for="ad in ads" :key="ad.id" :href="ad.link_url || undefined" target="_blank" rel="noopener">
+        <img v-if="ad.image_url" :src="ad.image_url" :alt="ad.title" />
+        <span>{{ ad.title }}</span>
+      </a>
+    </aside>
+  </div>
 </template>

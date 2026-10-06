@@ -3,6 +3,7 @@ from datetime import datetime, timedelta
 from fastapi import APIRouter, Cookie, Depends, HTTPException, Response
 from pydantic import BaseModel
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.deps import db_session, require_user
@@ -22,6 +23,8 @@ from app.security import (
     record_failure,
     totp_uri,
     verify_password,
+    issue_captcha,
+    take_captcha,
 )
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
@@ -31,21 +34,50 @@ class Creds(BaseModel):
     email: str
     password: str
     totp: str = ""
+    captcha_id: str = ""
+    captcha_progress: int = 0
+
+
+class ProfileBody(BaseModel):
+    display_name: str = ""
+
+
+class PasswordBody(BaseModel):
+    current_password: str
+    new_password: str
 
 
 def _cookie(response: Response, token: str) -> None:
     response.set_cookie("nav_session", token, httponly=True, samesite="lax", max_age=60 * 60 * 12, path="/")
 
 
+@router.post("/captcha")
+def captcha():
+    if not rate_limit("captcha", 30, 60):
+        raise HTTPException(status_code=429, detail="too many requests")
+    return {"id": issue_captcha()}
+
+
+def _email(value: str) -> str:
+    return value.strip().lower()
+
+
 @router.post("/register")
 def register(body: Creds, response: Response, db: Session = Depends(db_session)):
-    if not rate_limit(f"reg:{body.email}", 5, 3600):
+    if not take_captcha(body.captcha_id, body.captcha_progress):
+        raise HTTPException(status_code=400, detail="captcha required")
+    email = _email(body.email)
+    if not rate_limit(f"reg:{email}", 5, 3600):
         raise HTTPException(status_code=429, detail="too many requests")
-    if db.scalar(select(User).where(User.email == body.email)):
+    if db.scalar(select(User).where(User.email == email)):
         raise HTTPException(status_code=400, detail="email exists")
-    user = User(email=str(body.email), password_hash=hash_password(body.password))
+    user = User(email=email, password_hash=hash_password(body.password))
     db.add(user)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=400, detail="email exists")
     db.refresh(user)
     token = new_session(user.id, user.role, False)
     _cookie(response, token)
@@ -54,7 +86,7 @@ def register(body: Creds, response: Response, db: Session = Depends(db_session))
 
 @router.post("/login")
 def login(body: Creds, response: Response, db: Session = Depends(db_session)):
-    email = str(body.email)
+    email = _email(body.email)
     if not rate_limit(f"login:{email}", 10, 900):
         raise HTTPException(status_code=429, detail="too many requests")
     if lock_until(email):
@@ -93,12 +125,32 @@ def me(user: User = Depends(require_user), nav_session: str | None = Cookie(defa
     return {
         "id": user.id,
         "email": user.email,
+        "display_name": user.display_name,
         "role": user.role,
         "plan": plan_active(user),
         "plan_expires_at": user.plan_expires_at.isoformat() if user.plan_expires_at else None,
         "totp_enabled": user.totp_enabled,
         "totp_ok": data.get("totp_ok", False),
     }
+
+
+@router.patch("/profile")
+def update_profile(body: ProfileBody, user: User = Depends(require_user), db: Session = Depends(db_session)):
+    name = body.display_name.strip()[:40]
+    user.display_name = name
+    db.commit()
+    return {"display_name": user.display_name}
+
+
+@router.post("/password")
+def change_password(body: PasswordBody, user: User = Depends(require_user), db: Session = Depends(db_session)):
+    if not verify_password(body.current_password, user.password_hash):
+        raise HTTPException(status_code=400, detail="invalid credentials")
+    if len(body.new_password) < 8:
+        raise HTTPException(status_code=400, detail="password too short")
+    user.password_hash = hash_password(body.new_password)
+    db.commit()
+    return {"ok": True}
 
 
 @router.post("/totp/setup")

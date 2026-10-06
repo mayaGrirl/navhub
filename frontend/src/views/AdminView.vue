@@ -36,6 +36,7 @@ const slotGroups = [
   { page: "关于我们右侧", items: [1, 2, 3].map((n) => ({ id: `about-${n}`, where: `右侧第 ${n} 个` })) },
   { page: "联系方式右侧", items: [1, 2, 3].map((n) => ({ id: `contact-${n}`, where: `右侧第 ${n} 个` })) },
   { page: "登录 / 注册左侧", items: [1, 2, 3].map((n) => ({ id: `auth-${n}`, where: `左侧轮播第 ${n} 张` })) },
+  { page: "个人中心右侧", items: [1, 2].map((n) => ({ id: `account-${n}`, where: `右侧第 ${n} 个` })) },
   { page: "页面底部", items: [{ id: "footer", where: "页脚右侧广告" }] },
 ];
 function slotWhere(id) {
