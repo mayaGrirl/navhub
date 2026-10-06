@@ -1,9 +1,10 @@
 <script setup>
 import { computed, onMounted, ref } from "vue";
-import { useRouter } from "vue-router";
+import { useRoute, useRouter } from "vue-router";
 import { useI18n } from "vue-i18n";
 import http from "../api";
 
+const route = useRoute();
 const router = useRouter();
 const { locale, t } = useI18n();
 const ready = ref(false);
@@ -26,6 +27,13 @@ const description = ref("");
 const categories = computed(() => tree.value.find((item) => item.id === tabId.value)?.categories || []);
 
 const initial = computed(() => (name.value || user.value?.email || "?").slice(0, 1).toUpperCase());
+const origin = computed(() => window.location.origin);
+const proxyToken = ref("");
+const levelInfo = ref(null);
+const siteBoards = ref({ favorites: [], recommends: [] });
+const myMarks = ref([]);
+const copied = ref("");
+const proxyLink = computed(() => proxyToken.value ? `${origin.value}/api/proxy/acquire?token=${encodeURIComponent(proxyToken.value)}` : "");
 
 onMounted(async () => {
   try {
@@ -36,6 +44,17 @@ onMounted(async () => {
     router.replace("/login");
     return;
   }
+  if (["proxy", "submit", "profile", "levels", "marks"].includes(route.query.tab)) tab.value = route.query.tab;
+  const [tokenRes, levelRes, rankRes, markRes] = await Promise.all([
+    http.get("/proxy/token"),
+    http.get("/me/level"),
+    http.get("/ranks", { params: { locale: locale.value } }),
+    http.get("/me/marks", { params: { locale: locale.value } }),
+  ]);
+  levelInfo.value = levelRes.data;
+  siteBoards.value = rankRes.data;
+  myMarks.value = markRes.data.items;
+  proxyToken.value = tokenRes.data.token || "";
   ready.value = true;
   const [treeRes, adRes] = await Promise.all([
     http.get("/tree", { params: { locale: locale.value } }),
@@ -48,6 +67,28 @@ onMounted(async () => {
   categoryId.value = tree.value[0]?.categories[0]?.id || "";
 });
 
+let holdTimer = 0;
+function holdStart(event) {
+  const chip = event.currentTarget;
+  holdTimer = window.setTimeout(() => chip.classList.add("held"), 280);
+}
+function holdEnd(event) {
+  window.clearTimeout(holdTimer);
+  event.currentTarget.classList.remove("held");
+}
+function siteIcon(url) {
+  try {
+    const host = new URL(url).hostname;
+    return host ? `https://www.google.com/s2/favicons?domain=${host}&sz=64` : "/favicon.svg";
+  } catch {
+    return "/favicon.svg";
+  }
+}
+function logoOf(link) {
+  const logo = link.logo_url || "";
+  const placeholder = !logo || /empty\.png|google\.com\/s2\/favicons|opengraph|ogp|default_social/i.test(logo);
+  return placeholder ? siteIcon(link.url) : logo;
+}
 function pickTab(id) {
   tabId.value = id;
   const next = tree.value.find((item) => item.id === id);
@@ -77,6 +118,22 @@ async function savePassword() {
     const detail = err.response?.data?.detail;
     notice.value = detail ? t(detail) : t("authFailed");
   }
+}
+
+async function copyText(value, key) {
+  await navigator.clipboard.writeText(value);
+  copied.value = key;
+}
+
+async function dropMark(item) {
+  await http.post(`/links/${item.id}/mark`, { kind: item.kind });
+  myMarks.value = myMarks.value.filter((row) => !(row.id === item.id && row.kind === item.kind));
+  const { data } = await http.get("/ranks", { params: { locale: locale.value } });
+  siteBoards.value = data;
+}
+async function makeProxyToken() {
+  const { data } = await http.post("/proxy/token");
+  proxyToken.value = data.token;
 }
 
 async function uploadLogo(event) {
@@ -120,15 +177,19 @@ async function send() {
 </script>
 
 <template>
-  <div v-if="ready" class="account" :class="{ 'has-ads': ads.length }">
+  <div v-if="ready" class="account has-ads">
     <aside class="account-side">
       <div class="account-who">
         <span class="avatar">{{ initial }}</span>
         <strong>{{ user.display_name || user.email }}</strong>
         <em>{{ user.email }}</em>
+        <em v-if="levelInfo">Lv.{{ levelInfo.level }} · {{ levelInfo.points }} {{ locale === "zh" ? "积分" : "pts" }}</em>
       </div>
       <button type="button" :class="{ on: tab === 'profile' }" @click="tab = 'profile'">{{ t("profile") }}</button>
+      <button type="button" :class="{ on: tab === 'levels' }" @click="tab = 'levels'">{{ locale === "zh" ? "等级规则" : "Levels" }}</button>
+      <button type="button" :class="{ on: tab === 'marks' }" @click="tab = 'marks'">{{ locale === "zh" ? "收藏推荐" : "Saved" }}</button>
       <button type="button" :class="{ on: tab === 'submit' }" @click="tab = 'submit'">{{ t("submit") }}</button>
+      <button type="button" :class="{ on: tab === 'proxy' }" @click="tab = 'proxy'">{{ t("proxyPool") }}</button>
       <a href="/">NEXA</a>
     </aside>
     <section class="page form" v-if="tab === 'profile'">
@@ -145,7 +206,56 @@ async function send() {
       <button class="primary" type="button" @click="savePassword">{{ t("save") }}</button>
       <p v-if="notice">{{ notice }}</p>
     </section>
-    <form v-else class="page form" @submit.prevent="send">
+    <section v-else-if="tab === 'marks'" class="page form">
+      <h1>{{ locale === "zh" ? "我的收藏和推荐" : "My saves" }}</h1>
+      <h2><svg class="board-icon" viewBox="0 0 24 24"><path d="M12 21s-6.7-4.3-9.3-8.2C.6 10.1 1.2 6.6 4.2 5.2 6.3 4.2 8.6 4.8 10 6.4L12 8.7l2-2.3c1.4-1.6 3.7-2.2 5.8-1.2 3 1.4 3.6 4.9 1.5 7.6C18.7 16.7 12 21 12 21z"/></svg>{{ locale === "zh" ? "收藏" : "Favorites" }}</h2>
+      <div class="mark-list">
+        <div class="mine-row" v-for="(item, index) in myMarks.filter((row) => row.kind === 'favorite')" :key="'f' + item.id">
+          <a class="mark-chip" :href="item.url" target="_blank" rel="noreferrer">
+            <img :src="logoOf(item)" alt="" referrerpolicy="no-referrer" @error="$event.target.src = siteIcon(item.url)" />
+            <span class="name">{{ item.title }}</span>
+            <b>{{ item.favorite_count }}</b>
+          </a>
+          <button type="button" @click="dropMark(item)">{{ locale === "zh" ? "取消" : "Remove" }}</button>
+        </div>
+      </div>
+      <p v-if="!myMarks.some((row) => row.kind === 'favorite')" class="meta">{{ locale === "zh" ? "还没有收藏" : "No favorites yet" }}</p>
+      <h2><svg class="board-icon" viewBox="0 0 24 24"><path d="M8 10V21H4V10h4zm2.2 11c-.7 0-1.3-.2-1.8-.7-.4-.4-.6-.9-.6-1.5V10.2c0-.3.1-.6.3-.9l4.6-5.8c.3-.4.8-.6 1.3-.5.6.1 1 .6 1 1.2v4.3h4.4c.8 0 1.5.6 1.6 1.4l.8 5.4c.1.8-.2 1.6-.8 2.1-.5.5-1.2.8-1.9.8H10.2z"/></svg>{{ locale === "zh" ? "推荐" : "Recommendations" }}</h2>
+      <div class="mark-list">
+        <div class="mine-row" v-for="(item, index) in myMarks.filter((row) => row.kind === 'recommend')" :key="'r' + item.id">
+          <a class="mark-chip" :href="item.url" target="_blank" rel="noreferrer">
+            <img :src="logoOf(item)" alt="" referrerpolicy="no-referrer" @error="$event.target.src = siteIcon(item.url)" />
+            <span class="name">{{ item.title }}</span>
+            <b>{{ item.recommend_count }}</b>
+          </a>
+          <button type="button" @click="dropMark(item)">{{ locale === "zh" ? "取消" : "Remove" }}</button>
+        </div>
+      </div>
+      <p v-if="!myMarks.some((row) => row.kind === 'recommend')" class="meta">{{ locale === "zh" ? "还没有推荐" : "No recommendations yet" }}</p>
+    </section>
+    <section v-else-if="tab === 'levels'" class="page form">
+      <h1>{{ locale === "zh" ? "等级规则" : "Level rules" }}</h1>
+      <p class="meta" v-if="levelInfo">{{ locale === "zh" ? `当前 Lv.${levelInfo.level}，${levelInfo.points} 积分。新注册默认 Lv.0。提交一条站内还没有的链接加 ${levelInfo.points_per_link} 分，积分达到下一档门槛会自动升级。代理池按当前等级限流，现在每分钟 ${levelInfo.proxy_per_minute} 次。` : `You are Lv.${levelInfo.level} with ${levelInfo.points} points. New accounts start at Lv.0. Each new directory link is worth ${levelInfo.points_per_link} point(s), and the level updates as soon as you reach the next threshold. The proxy pool follows your level: ${levelInfo.proxy_per_minute} calls per minute.` }}</p>
+      <table v-if="levelInfo" class="level-table">
+        <thead>
+          <tr>
+            <th>{{ locale === "zh" ? "等级" : "Level" }}</th>
+            <th>{{ locale === "zh" ? "所需积分" : "Points" }}</th>
+            <th>{{ locale === "zh" ? "获取" : "Earn" }}</th>
+            <th>{{ locale === "zh" ? "代理 / 分钟" : "Proxy / min" }}</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="row in levelInfo.levels" :key="row.level" :class="{ on: row.level === levelInfo.level }">
+            <td>Lv.{{ row.level }}</td>
+            <td>{{ row.min_points }}</td>
+            <td>+{{ levelInfo.points_per_link }} / {{ locale === "zh" ? "有效链接" : "link" }}</td>
+            <td>{{ row.proxy_per_minute }}{{ locale === "zh" ? " 次" : "" }}</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+    <form v-else-if="tab === 'submit'" class="page form" @submit.prevent="send">
       <h1>{{ t("submit") }}</h1>
       <label>{{ t("category") }}</label>
       <div class="pick-tabs">
@@ -165,8 +275,58 @@ async function send() {
       <button class="primary" type="submit">{{ t("submit") }}</button>
       <p v-if="notice">{{ notice }}</p>
     </form>
-    <aside v-if="ads.length" class="account-ads">
-      <a v-for="ad in ads" :key="ad.id" :href="ad.link_url || undefined" target="_blank" rel="noopener">
+    <section v-else-if="tab === 'proxy'" class="page form proxy-doc">
+      <h1>{{ t("proxyPool") }}</h1>
+      <p>{{ locale === "zh" ? `代理池是单独维护的服务。这里只给已登录用户发放调用令牌，令牌和登录会话无关。每次返回一个当前可用的 HTTP 代理。当前等级每分钟最多 ${levelInfo?.proxy_per_minute || 10} 次。` : `The proxy pool is a separate service. This page only issues a call token for signed-in users. The token is not your login session. Each call returns one working HTTP proxy. Your level allows ${levelInfo?.proxy_per_minute || 10} calls per minute.` }}</p>
+      <button class="primary" type="button" @click="makeProxyToken">{{ locale === "zh" ? "生成令牌" : "Generate token" }}</button>
+      <div v-if="proxyToken" class="copy-row">
+        <pre>{{ proxyToken }}</pre>
+        <button type="button" @click="copyText(proxyToken, 'token')">{{ copied === "token" ? (locale === "zh" ? "已复制" : "Copied") : (locale === "zh" ? "复制" : "Copy") }}</button>
+      </div>
+      <p v-if="proxyLink">{{ locale === "zh" ? "下面的地址取自当前打开的域名，部署到正式域名后会自动换成那个域名。" : "The address below uses the domain you opened. It changes automatically after the site is deployed." }}</p>
+      <div v-if="proxyLink" class="copy-row">
+        <pre>{{ proxyLink }}</pre>
+        <button type="button" @click="copyText(proxyLink, 'link')">{{ copied === "link" ? (locale === "zh" ? "已复制" : "Copied") : (locale === "zh" ? "复制" : "Copy") }}</button>
+      </div>
+      <h2>{{ locale === "zh" ? "请求" : "Request" }}</h2>
+      <pre>GET /api/proxy/acquire
+Authorization: Bearer 你的令牌</pre>
+      <h2>{{ locale === "zh" ? "返回" : "Response" }}</h2>
+      <pre>{ "proxy": "http://1.2.3.4:8080" }</pre>
+      <p>{{ locale === "zh" ? "没有可用代理时 proxy 为 null。未带令牌会返回 401。" : "proxy is null when none are available. A missing token returns 401." }}</p>
+      <h2>{{ locale === "zh" ? "示例" : "Example" }}</h2>
+      <pre>curl -H "Authorization: Bearer {{ proxyToken || "你的令牌" }}" {{ origin }}/api/proxy/acquire
+curl -x http://1.2.3.4:8080 https://example.com</pre>
+      <p>{{ locale === "zh" ? "把 proxy 字段原样用作 HTTP 代理。再次点击生成会换掉旧令牌。定时抓取不使用这个令牌，它直接访问代理池。" : "Use the proxy field as an HTTP proxy. Generating again replaces the old token. Scheduled crawls do not use this token; they call the pool directly." }}</p>
+    </section>
+    <aside class="account-ads">
+      <section>
+        <h2><svg class="board-icon" viewBox="0 0 24 24"><path d="M12 21s-6.7-4.3-9.3-8.2C.6 10.1 1.2 6.6 4.2 5.2 6.3 4.2 8.6 4.8 10 6.4L12 8.7l2-2.3c1.4-1.6 3.7-2.2 5.8-1.2 3 1.4 3.6 4.9 1.5 7.6C18.7 16.7 12 21 12 21z"/></svg>{{ locale === "zh" ? "收藏榜" : "Favorites" }}</h2>
+        <div class="mark-list">
+          <a class="mark-chip" v-for="(item, index) in siteBoards.favorites" :key="'f' + item.id" :href="item.url" target="_blank" rel="noreferrer">
+            <img :src="logoOf(item)" alt="" referrerpolicy="no-referrer" @error="$event.target.src = siteIcon(item.url)" />
+            <span class="name">{{ item.title }}</span>
+            <b>{{ item.count }}</b>
+          </a>
+        </div>
+        <p v-if="!siteBoards.favorites.length" class="meta">{{ locale === "zh" ? "还没有收藏" : "No favorites yet" }}</p>
+      </section>
+      <a v-if="ads[0]" :href="ads[0].link_url || undefined" target="_blank" rel="noopener">
+        <img v-if="ads[0].image_url" :src="ads[0].image_url" :alt="ads[0].title" />
+        <span>{{ ads[0].title }}</span>
+      </a>
+      <section>
+        <h2><svg class="board-icon" viewBox="0 0 24 24"><path d="M8 10V21H4V10h4zm2.2 11c-.7 0-1.3-.2-1.8-.7-.4-.4-.6-.9-.6-1.5V10.2c0-.3.1-.6.3-.9l4.6-5.8c.3-.4.8-.6 1.3-.5.6.1 1 .6 1 1.2v4.3h4.4c.8 0 1.5.6 1.6 1.4l.8 5.4c.1.8-.2 1.6-.8 2.1-.5.5-1.2.8-1.9.8H10.2z"/></svg>{{ locale === "zh" ? "推荐榜" : "Recommendations" }}</h2>
+        <div class="mark-list">
+          <a class="mark-chip" v-for="(item, index) in siteBoards.recommends" :key="'r' + item.id" :href="item.url" target="_blank" rel="noreferrer">
+            <img :src="logoOf(item)" alt="" referrerpolicy="no-referrer" @error="$event.target.src = siteIcon(item.url)" />
+            <span class="name">{{ item.title }}</span>
+            <b>{{ item.count }}</b>
+          </a>
+        </div>
+        <p v-if="!siteBoards.recommends.length" class="meta">{{ locale === "zh" ? "还没有推荐" : "No recommendations yet" }}</p>
+      </section>
+      <a v-for="ad in ads.slice(1)" :key="ad.id" :href="ad.link_url || undefined" target="_blank" rel="noopener">
         <img v-if="ad.image_url" :src="ad.image_url" :alt="ad.title" />
         <span>{{ ad.title }}</span>
       </a>

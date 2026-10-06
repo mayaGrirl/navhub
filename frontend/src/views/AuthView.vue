@@ -101,7 +101,8 @@ async function send() {
       captcha_id: captchaId.value,
       captcha_progress: captchaProgress.value,
     });
-    router.push("/");
+    const next = typeof route.query.next === "string" ? route.query.next : "";
+    router.push(next.startsWith("/") && !next.startsWith("//") ? next : "/");
   } catch (err) {
     const detail = err.response?.data?.detail;
     error.value = detail ? t(detail) : t("authFailed");
@@ -130,7 +131,6 @@ async function send() {
         <em>{{ slid ? t("slid") : t("slide") }}</em>
         <button class="slide-knob" type="button" :style="{ left: captchaProgress + '%' }" @pointerdown="dragStart" @pointermove="dragMove" @pointerup="dragEnd" @pointercancel="dragEnd">›</button>
       </div>
-      <input v-if="mode === 'login'" v-model="totp" :placeholder="t('totp')" />
       <button class="primary" type="submit">{{ mode === "register" ? t("createAccount") : t("login") }}</button>
       <p v-if="error">{{ error }}</p>
       <p><a class="auth-switch" :href="mode === 'register' ? '/login' : '/register'">{{ mode === "register" ? t("haveAccount") : t("noAccount") }}</a></p>

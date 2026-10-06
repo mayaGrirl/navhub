@@ -2,20 +2,32 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+import secrets
+
+import httpx
+from fastapi import APIRouter, Depends, File, Header, HTTPException, Query, Response, UploadFile
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.deps import db_session, require_user
-from app.models import Ad, Announcement, Category, Link, NewsItem, Page, Tab, User
-from app.security import month_key, plan_active, quota_for, rds
+from app.models import Ad, Announcement, Category, Level, Link, LinkMark, NewsItem, Page, PointRule, Tab, User
+from app.urls import norm_url
+from app.security import month_key, plan_active, quota_for, rate_limit, rds
 
 router = APIRouter(prefix="/api", tags=["public"])
 
 
 def _t(locale: str, en: str, zh: str) -> str:
     return zh if locale == "zh" else en
+
+
+@router.get("/guard")
+def guard(response: Response):
+    token = secrets.token_urlsafe(24)
+    rds.setex(f"pass:{token}", 60 * 60 * 6, "1")
+    response.set_cookie("nav_pass", token, max_age=60 * 60 * 6, httponly=True, samesite="lax", path="/")
+    return {"ok": True}
 
 
 @router.get("/tree")
@@ -71,6 +83,8 @@ def search(q: str = "", locale: str = "en", db: Session = Depends(db_session)):
             "title": _t(locale, link.title_en, link.title_zh),
             "url": link.url,
             "logo_url": link.logo_url,
+            "tab_id": tab.id,
+            "category_id": category.id,
             "tab": _t(locale, tab.title_en, tab.title_zh),
             "category": _t(locale, category.title_en, category.title_zh),
         }
@@ -183,6 +197,8 @@ def board(tab_id: int, locale: str = "en", db: Session = Depends(db_session)):
                         "logo_url": row.logo_url,
                         "is_free": row.is_free,
                         "is_hot": row.is_hot,
+                        "favorite_count": row.favorite_count or 0,
+                        "recommend_count": row.recommend_count or 0,
                     }
                     for row in rows
                 ],
@@ -191,13 +207,158 @@ def board(tab_id: int, locale: str = "en", db: Session = Depends(db_session)):
     return payload
 
 
+def user_level(db: Session, user: User) -> Level:
+    rows = db.scalars(select(Level).where(Level.level <= 10).order_by(Level.min_points.desc(), Level.level.desc())).all()
+    points = user.points or 0
+    for row in rows:
+        if points >= row.min_points:
+            return row
+    return rows[-1] if rows else Level(level=0, min_points=0, proxy_per_minute=10)
+
+
+@router.get("/me/level")
+def my_level(user: User = Depends(require_user), db: Session = Depends(db_session)):
+    row = user_level(db, user)
+    ladder = db.scalars(select(Level).where(Level.level <= 10).order_by(Level.level)).all()
+    rule = db.get(PointRule, 1)
+    per_link = rule.points_per_link if rule else 1
+    return {
+        "points": user.points or 0,
+        "level": row.level,
+        "proxy_per_minute": row.proxy_per_minute,
+        "next_points": next_points(db, row),
+        "points_per_link": per_link,
+        "levels": [{"level": item.level, "min_points": item.min_points, "proxy_per_minute": item.proxy_per_minute} for item in ladder],
+    }
+
+
+def next_points(db: Session, current: Level) -> int | None:
+    nxt = db.scalar(select(Level).where(Level.level == current.level + 1))
+    return nxt.min_points if nxt else None
+
+
+@router.post("/links/{link_id}/mark")
+def mark_link(link_id: int, payload: dict, user: User = Depends(require_user), db: Session = Depends(db_session)):
+    kind = payload.get("kind")
+    if kind not in {"favorite", "recommend"}:
+        raise HTTPException(status_code=400, detail="kind required")
+    link = db.get(Link, link_id)
+    if not link or link.status != "published":
+        raise HTTPException(status_code=404, detail="not found")
+    row = db.scalar(select(LinkMark).where(LinkMark.user_id == user.id, LinkMark.link_id == link_id, LinkMark.kind == kind))
+    field = "favorite_count" if kind == "favorite" else "recommend_count"
+    if row:
+        db.delete(row)
+        setattr(link, field, max(0, (getattr(link, field) or 0) - 1))
+        on = False
+    else:
+        db.add(LinkMark(user_id=user.id, link_id=link_id, kind=kind))
+        setattr(link, field, (getattr(link, field) or 0) + 1)
+        on = True
+    db.commit()
+    return {"on": on, "favorite_count": link.favorite_count or 0, "recommend_count": link.recommend_count or 0}
+
+
+@router.get("/me/marks")
+def my_marks(locale: str = "en", user: User = Depends(require_user), db: Session = Depends(db_session)):
+    rows = db.scalars(select(LinkMark).where(LinkMark.user_id == user.id)).all()
+    items = []
+    for mark in rows:
+        link = db.get(Link, mark.link_id)
+        if not link:
+            continue
+        items.append({"id": link.id, "kind": mark.kind, "title": _t(locale, link.title_en, link.title_zh), "url": link.url, "logo_url": link.logo_url, "favorite_count": link.favorite_count or 0, "recommend_count": link.recommend_count or 0})
+    return {"items": items}
+
+
+@router.get("/ranks")
+def ranks(locale: str = "en", db: Session = Depends(db_session)):
+    def board(kind: str):
+        from sqlalchemy import text
+
+        rows = db.execute(
+            text(
+                "SELECT id, title_en, title_zh, url, logo_url, "
+                + ("favorite_count" if kind == "favorite" else "recommend_count")
+                + " AS total FROM links WHERE status = 'published' AND "
+                + ("favorite_count" if kind == "favorite" else "recommend_count")
+                + " > 0 ORDER BY total DESC LIMIT 5"
+            ),
+            {"kind": kind},
+        ).all()
+        return [{"id": row.id, "title": _t(locale, row.title_en, row.title_zh), "url": row.url, "logo_url": row.logo_url or "", "count": row.total} for row in rows]
+
+    def clicks():
+        from sqlalchemy import text
+
+        rows = db.execute(
+            text(
+                "SELECT id, title_en, title_zh, url, logo_url, click_count AS total "
+                "FROM links WHERE status = 'published' AND click_count > 0 "
+                "ORDER BY total DESC LIMIT 10"
+            )
+        ).all()
+        return [{"id": row.id, "title": _t(locale, row.title_en, row.title_zh), "url": row.url, "logo_url": row.logo_url or "", "count": row.total} for row in rows]
+
+    return {"favorites": board("favorite"), "recommends": board("recommend"), "clicks": clicks()}
+
+
+@router.post("/links/{link_id}/click")
+def count_click(link_id: int, db: Session = Depends(db_session)):
+    link = db.get(Link, link_id)
+    if not link or link.status != "published":
+        raise HTTPException(status_code=404, detail="not found")
+    link.click_count = (link.click_count or 0) + 1
+    link.clicks_ready = True
+    db.commit()
+    return {"click_count": link.click_count}
+
+
+@router.post("/proxy/token")
+def issue_proxy_token(user: User = Depends(require_user), db: Session = Depends(db_session)):
+    user.proxy_token = secrets.token_urlsafe(32)
+    db.commit()
+    return {"token": user.proxy_token}
+
+
+@router.get("/proxy/token")
+def read_proxy_token(user: User = Depends(require_user)):
+    return {"token": user.proxy_token or ""}
+
+
+@router.get("/proxy/acquire")
+def acquire_proxy(token: str = Query(default=""), authorization: str | None = Header(default=None), x_proxy_token: str | None = Header(default=None), db: Session = Depends(db_session)):
+    token = (x_proxy_token or token or "").strip()
+    if not token and authorization and authorization.lower().startswith("bearer "):
+        token = authorization.split(" ", 1)[1].strip()
+    user = db.scalar(select(User).where(User.proxy_token == token)) if token else None
+    if not user:
+        raise HTTPException(status_code=401, detail="proxy token required")
+    level = user_level(db, user)
+    if not rate_limit(f"proxy:{user.id}", level.proxy_per_minute, 60):
+        raise HTTPException(status_code=429, detail="too many requests")
+    base = (settings.proxy_pool_url or "").rstrip("/")
+    if not base:
+        return {"proxy": None}
+    try:
+        response = httpx.get(f"{base}/acquire", timeout=8)
+        response.raise_for_status()
+        return {"proxy": response.json().get("proxy")}
+    except httpx.HTTPError:
+        return {"proxy": None}
+
+
 @router.get("/github")
 def github(period: str = "past_24_hours"):
     from app.github_ranks import load_ranks
 
     if period not in {"past_24_hours", "past_week", "past_month", "total"}:
         period = "past_24_hours"
-    return load_ranks(period)
+    try:
+        return load_ranks(period)
+    except Exception as exc:
+        print("github load failed", exc.__class__.__name__)
+        return []
 
 
 @router.post("/uploads")
@@ -244,9 +405,19 @@ def submit(payload: dict, user: User = Depends(require_user), db: Session = Depe
         source="user",
         submitter_id=user.id,
         vip_badge=plan == "vip",
+        favorite_count=__import__("random").randint(6, 96),
+        recommend_count=__import__("random").randint(2, 48),
+        click_count=__import__("random").randint(12, 240),
+        counts_ready=True,
+        clicks_ready=True,
     )
     if not link.url.startswith("http"):
         raise HTTPException(status_code=400, detail="url required")
+    link.norm_url = norm_url(link.url)
+    if db.scalar(select(Link.id).where(Link.norm_url == link.norm_url)):
+        raise HTTPException(status_code=400, detail="link exists")
+    rule = db.get(PointRule, 1)
+    user.points = (user.points or 0) + (rule.points_per_link if rule else 1)
     db.add(link)
     db.commit()
     rds.incr(key)

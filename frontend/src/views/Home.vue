@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, onUnmounted, ref, watch } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import http from "../api";
 
@@ -9,6 +9,8 @@ const tabId = ref(null);
 const sections = ref([]);
 const news = ref([]);
 const notes = ref([]);
+const siteBoards = ref({ favorites: [], recommends: [], clicks: [] });
+const mine = ref({ favorite: [], recommend: [] });
 const growthRanks = ref([]);
 const totalRanks = ref([]);
 const bannerIndex = ref(0);
@@ -20,6 +22,7 @@ const ads = ref([]);
 const query = ref("");
 const siteQuery = ref("");
 const siteHits = ref([]);
+const spotlight = ref(null);
 const siteWhere = ref("");
 const engine = ref("baidu");
 const engineGroups = [
@@ -93,7 +96,7 @@ function feedAdAt(index) {
   return feedAds.value[(index + 1) / 2 - 1] || null;
 }
 const activeSection = ref(null);
-const adultOk = ref(sessionStorage.getItem("adult-ok") === "1");
+const adultOk = ref(localStorage.getItem("adult-ok-2") === "1");
 
 const currentTab = computed(() => tabs.value.find((item) => item.id === tabId.value));
 const isHome = computed(() => !currentTab.value || currentTab.value.kind === "home");
@@ -151,17 +154,70 @@ function jumpTo(id) {
   document.getElementById(`cat-${id}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
+async function loadSiteBoards() {
+  const { data } = await http.get("/ranks", { params: { locale: locale.value } });
+  siteBoards.value = data;
+}
+
+let holdTimer = 0;
+function holdStart(event) {
+  const chip = event.currentTarget;
+  holdTimer = window.setTimeout(() => chip.classList.add("held"), 280);
+}
+function holdEnd(event) {
+  window.clearTimeout(holdTimer);
+  event.currentTarget.classList.remove("held");
+}
+
+function countClick(link) {
+  http.post(`/links/${link.id}/click`).then(() => loadSiteBoards()).catch(() => {});
+}
+
+function marked(link, kind) {
+  return mine.value[kind].includes(link.id);
+}
+
+async function loadMine() {
+  if (!user.value) {
+    mine.value = { favorite: [], recommend: [] };
+    return;
+  }
+  const { data } = await http.get("/me/marks");
+  mine.value = {
+    favorite: data.items.filter((item) => item.kind === "favorite").map((item) => item.id),
+    recommend: data.items.filter((item) => item.kind === "recommend").map((item) => item.id),
+  };
+}
+
+async function mark(link, kind) {
+  if (!user.value) {
+    window.location.href = "/login?next=" + encodeURIComponent("/");
+    return;
+  }
+  const { data } = await http.post(`/links/${link.id}/mark`, { kind });
+  link.favorite_count = data.favorite_count;
+  link.recommend_count = data.recommend_count;
+  const list = mine.value[kind];
+  mine.value[kind] = data.on ? [...list, link.id] : list.filter((id) => id !== link.id);
+  await loadSiteBoards();
+}
+
 async function loadRanks(next = period.value) {
   period.value = next;
-  const [growth, total] = await Promise.all([
-    http.get("/github", { params: { period: next } }),
-    http.get("/github", { params: { period: "total" } }),
-  ]);
   const byStars = (rows) => [...(Array.isArray(rows) ? rows : [])].sort(
-    (a, b) => Number(String(b.stars).replace(/\D/g, "")) - Number(String(a.stars).replace(/\D/g, ""))
+    (a, b) => Number(String(b.stars || "").replace(/\D/g, "")) - Number(String(a.stars || "").replace(/\D/g, ""))
   );
-  growthRanks.value = byStars(growth.data);
-  totalRanks.value = byStars(total.data);
+  try {
+    const [growth, total] = await Promise.all([
+      http.get("/github", { params: { period: next } }),
+      http.get("/github", { params: { period: "total" } }),
+    ]);
+    growthRanks.value = byStars(growth.data);
+    totalRanks.value = byStars(total.data);
+  } catch {
+    growthRanks.value = [];
+    totalRanks.value = [];
+  }
 }
 
 function moveBanner(step) {
@@ -188,7 +244,12 @@ function pickTab(id) {
 
 function allowAdult() {
   adultOk.value = true;
-  sessionStorage.setItem("adult-ok", "1");
+  localStorage.setItem("adult-ok-2", "1");
+}
+
+function leaveAdult() {
+  const home = tabs.value.find((item) => item.kind === "home");
+  if (home) tabId.value = home.id;
 }
 
 async function logout() {
@@ -290,6 +351,18 @@ async function searchSite() {
   siteHits.value = data;
 }
 
+async function focusHit(hit) {
+  siteHits.value = [];
+  if (tabId.value !== hit.tab_id) {
+    tabId.value = hit.tab_id;
+    await loadBoard();
+  }
+  spotlight.value = hit.id;
+  activeSection.value = hit.category_id;
+  await nextTick();
+  document.getElementById(`link-${hit.id}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+}
+
 function searchWord(word) {
   query.value = word;
   searchWeb();
@@ -308,6 +381,7 @@ watch(locale, async () => {
   document.querySelector('meta[property="og:description"]')?.setAttribute("content", description);
   await loadTree();
   await loadBoard();
+  await loadSiteBoards();
 });
 
 onMounted(async () => {
@@ -326,8 +400,10 @@ onMounted(async () => {
   }
   if (noteRes.status === "fulfilled") notes.value = noteRes.value.data;
   if (newsRes.status === "fulfilled") news.value = newsRes.value.data;
+  loadSiteBoards();
   if (contactRes.status === "fulfilled") contact.value = contactRes.value.data;
   if (me.status === "fulfilled") user.value = me.value.data;
+  loadMine();
   if (adRes.status === "fulfilled") ads.value = adRes.value.data;
   loadRanks("past_24_hours");
 });
@@ -348,14 +424,15 @@ onUnmounted(() => clearInterval(bannerTimer));
       <div class="site-search">
         <input v-model="siteQuery" :placeholder="locale === 'zh' ? '站内搜索' : 'Search this site'" @input="onSiteInput('top')" @focus="onSiteInput('top')" />
         <div v-if="siteWhere === 'top' && siteQuery.trim() && siteHits.length" class="site-hits">
-          <a v-for="hit in siteHits" :key="hit.id" :href="hit.url" target="_blank" rel="noreferrer">
-            <strong>{{ hit.title }}</strong>
-            <em>{{ hit.tab }} · {{ hit.category }}</em>
-          </a>
+          <button v-for="hit in siteHits" :key="'f' + hit.id" type="button" @click="focusHit(hit)">
+                <strong>{{ hit.title }}</strong>
+                <em>{{ hit.tab }} · {{ hit.category }}</em>
+              </button>
         </div>
         <p v-else-if="siteWhere === 'top' && siteQuery.trim()" class="site-hits empty">{{ locale === "zh" ? "没有匹配的链接" : "No matching links" }}</p>
       </div>
       <div class="nav-links">
+        <a :href="user ? '/submit?tab=proxy' : '/login?next=' + encodeURIComponent('/submit?tab=proxy')">{{ t("proxyPool") }}</a>
         <a v-if="user" href="/submit">{{ t("center") }}</a>
         <button class="text-btn" @click="setLocale(locale === 'en' ? 'zh' : 'en')">{{ locale === "en" ? "中文" : "EN" }}</button>
         <a v-if="!user" href="/login">{{ t("login") }}</a>
@@ -431,9 +508,18 @@ onUnmounted(() => clearInterval(bannerTimer));
 
       <main class="panel feed">
         <template v-if="currentTab?.adult && !adultOk">
-          <h2>{{ t("adultTitle") }}</h2>
-          <p>{{ t("adultBody") }}</p>
-          <button class="primary" @click="allowAdult">{{ t("enter") }}</button>
+          <section class="adult-gate">
+            <p class="adult-mark">18+</p>
+            <h2>{{ t("adultTitle") }}</h2>
+            <p>{{ t("adultLead") }}<strong class="adult-warn">{{ t("adultWarn") }}</strong>{{ t("adultAfter") }}</p>
+            <ul>
+              <li>{{ t("adultNote1") }}</li>
+              <li>{{ t("adultNote2") }}</li>
+              <li>{{ t("adultNote3") }}</li>
+            </ul>
+            <button class="primary" type="button" @click="allowAdult">{{ t("enter") }}</button>
+            <button class="adult-back" type="button" @click="leaveAdult">{{ t("underAge") }}</button>
+          </section>
         </template>
         <template v-else-if="isHome">
           <template v-for="(group, index) in groupedNews" :key="group.id">
@@ -457,10 +543,22 @@ onUnmounted(() => clearInterval(bannerTimer));
           <section :id="`cat-${section.id}`" class="group">
             <h2>{{ section.title }}</h2>
             <div class="grid">
-              <a class="card" v-for="link in section.links" :key="link.id" :href="link.url" target="_blank" rel="noreferrer">
+              <a class="card" :id="`link-${link.id}`" :class="{ spot: spotlight === link.id }" v-for="link in section.links" :key="link.id" :href="link.url" target="_blank" rel="noreferrer" @click="countClick(link)">
                 <img class="logo" :src="logoOf(link)" alt="" referrerpolicy="no-referrer" @error="useFallback($event, link)" />
                 <div>
-                  <h3>{{ link.title }}</h3>
+                  <div class="card-head">
+                    <h3>{{ link.title }}</h3>
+                    <span class="card-marks">
+                      <button type="button" :class="{ on: marked(link, 'favorite') }" :title="locale === 'zh' ? '收藏' : 'Save'" @click.prevent="mark(link, 'favorite')">
+                        <svg viewBox="0 0 24 24"><path d="M7 4.5h10a.5.5 0 0 1 .5.5v15l-5.5-3.2L6.5 20V5a.5.5 0 0 1 .5-.5z"/></svg>
+                        {{ link.favorite_count || 0 }}
+                      </button>
+                      <button type="button" :class="{ on: marked(link, 'recommend') }" :title="locale === 'zh' ? '推荐' : 'Recommend'" @click.prevent="mark(link, 'recommend')">
+                        <svg viewBox="0 0 24 24"><path d="M12 3.6 14.5 9l5.9.6-4.5 3.9 1.3 5.7L12 16.4 6.8 19.2 8.1 13.5 3.6 9.6 9.5 9 12 3.6z"/></svg>
+                        {{ link.recommend_count || 0 }}
+                      </button>
+                    </span>
+                  </div>
                   <p>{{ link.description }}</p>
                 </div>
               </a>
@@ -518,6 +616,39 @@ onUnmounted(() => clearInterval(bannerTimer));
             </a>
           </div>
         </section>
+        <section>
+          <h2><svg class="board-icon" viewBox="0 0 24 24"><path d="M12 21s-6.7-4.3-9.3-8.2C.6 10.1 1.2 6.6 4.2 5.2 6.3 4.2 8.6 4.8 10 6.4L12 8.7l2-2.3c1.4-1.6 3.7-2.2 5.8-1.2 3 1.4 3.6 4.9 1.5 7.6C18.7 16.7 12 21 12 21z"/></svg>{{ locale === "zh" ? "收藏榜" : "Favorites" }}</h2>
+          <div class="mark-list">
+            <a class="mark-chip" v-for="(item, index) in siteBoards.favorites" :key="'f' + item.id" :href="item.url" target="_blank" rel="noreferrer">
+              <img :src="logoOf(item)" alt="" referrerpolicy="no-referrer" @error="useFallback($event, item)" />
+              <span class="name">{{ item.title }}</span>
+              <b>{{ item.count }}</b>
+            </a>
+          </div>
+          <p v-if="!siteBoards.favorites.length" class="meta">{{ locale === "zh" ? "还没有收藏" : "No favorites yet" }}</p>
+        </section>
+        <section>
+          <h2><svg class="board-icon" viewBox="0 0 24 24"><path d="M8 10V21H4V10h4zm2.2 11c-.7 0-1.3-.2-1.8-.7-.4-.4-.6-.9-.6-1.5V10.2c0-.3.1-.6.3-.9l4.6-5.8c.3-.4.8-.6 1.3-.5.6.1 1 .6 1 1.2v4.3h4.4c.8 0 1.5.6 1.6 1.4l.8 5.4c.1.8-.2 1.6-.8 2.1-.5.5-1.2.8-1.9.8H10.2z"/></svg>{{ locale === "zh" ? "推荐榜" : "Recommendations" }}</h2>
+          <div class="mark-list">
+            <a class="mark-chip" v-for="(item, index) in siteBoards.recommends" :key="'r' + item.id" :href="item.url" target="_blank" rel="noreferrer">
+              <img :src="logoOf(item)" alt="" referrerpolicy="no-referrer" @error="useFallback($event, item)" />
+              <span class="name">{{ item.title }}</span>
+              <b>{{ item.count }}</b>
+            </a>
+          </div>
+          <p v-if="!siteBoards.recommends.length" class="meta">{{ locale === "zh" ? "还没有推荐" : "No recommendations yet" }}</p>
+        </section>
+        <section>
+          <h2><svg class="board-icon" viewBox="0 0 24 24"><path d="M6 3.2v13.2l3.6-2.6 2.1 4.8 2-0.9-2.1-4.8H18L6 3.2z"/></svg>{{ locale === "zh" ? "点击榜" : "Clicks" }}</h2>
+          <div class="mark-list">
+            <a class="mark-chip" v-for="item in siteBoards.clicks" :key="'c' + item.id" :href="item.url" target="_blank" rel="noreferrer" @click="countClick(item)">
+              <img :src="logoOf(item)" alt="" referrerpolicy="no-referrer" @error="useFallback($event, item)" />
+              <span class="name">{{ item.title }}</span>
+              <b>{{ item.count }}</b>
+            </a>
+          </div>
+          <p v-if="!siteBoards.clicks.length" class="meta">{{ locale === "zh" ? "还没有点击" : "No clicks yet" }}</p>
+        </section>
       </aside>
     </div>
 
@@ -528,15 +659,20 @@ onUnmounted(() => clearInterval(bannerTimer));
           <div class="site-search foot-search">
             <input v-model="siteQuery" :placeholder="locale === 'zh' ? '站内搜索' : 'Search this site'" @input="onSiteInput('foot')" @focus="onSiteInput('foot')" />
             <div v-if="siteWhere === 'foot' && siteQuery.trim() && siteHits.length" class="site-hits up">
-              <a v-for="hit in siteHits" :key="hit.id" :href="hit.url" target="_blank" rel="noreferrer">
+              <button v-for="hit in siteHits" :key="hit.id" type="button" @click="focusHit(hit)">
                 <strong>{{ hit.title }}</strong>
                 <em>{{ hit.tab }} · {{ hit.category }}</em>
-              </a>
+              </button>
             </div>
             <p v-else-if="siteWhere === 'foot' && siteQuery.trim()" class="site-hits up empty">{{ locale === "zh" ? "没有匹配的链接" : "No matching links" }}</p>
           </div>
         </div>
         <div class="foot-info">
+          <p class="foot-legal">
+            <span>{{ locale === "zh" ? "© 2026 NEXA 版权所有。本站只做导航，不保存第三方页面内容。" : "© 2026 NEXA. This site only lists links and does not store third-party pages." }}</span>
+            <span>{{ locale === "zh" ? "隐私保护：账号信息只用于登录和代理令牌，不出售、不对外提供。" : "Privacy: account data is used only for sign-in and proxy tokens, and is not sold or shared." }}</span>
+            <span>{{ locale === "zh" ? "未成年保护：可能含有不适内容的栏目，需确认已满十八岁才能访问。" : "Minors: sections that may include unsuitable links require confirmation that you are 18 or older." }}</span>
+          </p>
           <p v-if="contact" class="foot-meta">
             <span v-if="contact.email">{{ contact.email }}</span>
             <span v-if="contact.phone">{{ contact.phone }}</span>

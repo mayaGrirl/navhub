@@ -86,7 +86,7 @@ npm install
 
 ## 管理员
 
-接口第一次启动时，如果还没有后台路径，会生成一段随机路径，写到 `backend/data/admin_gate.txt`，并在日志里打印 `Admin gate path`。
+后台入口只认 `backend/.env` 里的 `ADMIN_GATE`。留空时第一次启动会生成 32 位随机码并写回 `.env`。改掉这段并重启接口后，只认新地址；旧地址接口返回 404，页面会回到首页。
 
 用默认账号登录后打开 `http://127.0.0.1:5173/<那段路径>`。默认账号是 `admin@example.com` / `change-me-now`。公开部署前必须改掉邮箱、密码和 `SECRET_KEY`。管理员要先绑定验证器，后台编辑接口才会放行。
 

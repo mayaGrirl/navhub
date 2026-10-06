@@ -40,6 +40,8 @@ def _admin_from_gate(
     user = db.get(User, data["user_id"])
     if not user or user.role != "admin":
         raise HTTPException(status_code=404, detail="not found")
+    if user.totp_enabled and not data.get("totp_ok"):
+        raise HTTPException(status_code=401, detail="totp required")
     return user, data
 
 

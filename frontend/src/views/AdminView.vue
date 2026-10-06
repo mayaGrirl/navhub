@@ -1,6 +1,9 @@
 <script setup>
 import { onMounted, ref } from "vue";
+import { useRouter } from "vue-router";
 import http, { setGate } from "../api";
+
+const router = useRouter();
 
 const props = defineProps({ gate: String });
 const ready = ref(false);
@@ -13,7 +16,10 @@ const pages = ref([]);
 const ads = ref([]);
 const users = ref([]);
 const jobs = ref([]);
+const levels = ref([]);
+const pointsPerLink = ref(1);
 const items = ref([]);
+const proxies = ref({ count: 0, sources: 0, items: [], source_items: [], note: "" });
 const me = ref(null);
 const totp = ref(null);
 const code = ref("");
@@ -47,9 +53,13 @@ function slotWhere(id) {
   return id;
 }
 const error = ref("");
+const consoleEmail = ref("");
+const consolePassword = ref("");
+const consoleCode = ref("");
+const needConsole = ref(false);
 
 async function load() {
-  const [t, c, l, p, a, u, j, i] = await Promise.all([
+  const [t, c, l, p, a, u, j, i, lv] = await Promise.all([
     http.get("/manage/tabs"),
     http.get("/manage/categories"),
     http.get("/manage/links"),
@@ -58,6 +68,7 @@ async function load() {
     http.get("/manage/users"),
     http.get("/manage/crawl/jobs"),
     http.get("/manage/crawl/items"),
+    http.get("/manage/levels"),
   ]);
   tabs.value = t.data;
   categories.value = c.data;
@@ -67,6 +78,13 @@ async function load() {
   users.value = u.data;
   jobs.value = j.data;
   items.value = i.data;
+  levels.value = lv.data.levels || [];
+  pointsPerLink.value = lv.data.points_per_link || 1;
+  try {
+    proxies.value = (await http.get("/manage/proxies")).data;
+  } catch {
+    proxies.value = { count: 0, sources: 0, items: [], note: "unavailable" };
+  }
 }
 
 onMounted(async () => {
@@ -77,10 +95,29 @@ onMounted(async () => {
     ready.value = true;
     if (me.value.totp_enabled && me.value.totp_ok) await load();
   } catch (err) {
-    if (err.response?.status === 404) missing.value = true;
-    else error.value = err.response?.data?.detail || "Sign in as an admin, then open this address again.";
+    if (err.response?.status === 404) {
+      missing.value = true;
+      router.replace("/");
+    }
+    else {
+      needConsole.value = true;
+      error.value = err.response?.data?.detail || "";
+    }
   }
 });
+
+async function consoleLogin() {
+  error.value = "";
+  try {
+    await http.post("/auth/console", { email: consoleEmail.value, password: consolePassword.value, totp: consoleCode.value });
+    me.value = (await http.get("/auth/me")).data;
+    ready.value = true;
+    needConsole.value = false;
+    if (me.value.totp_enabled && me.value.totp_ok) await load();
+  } catch (err) {
+    error.value = err.response?.data?.detail || "failed";
+  }
+}
 
 async function setupTotp() {
   totp.value = (await http.post("/auth/totp/setup")).data;
@@ -123,6 +160,24 @@ async function removeAd(id) {
   await http.delete(`/manage/ads/${id}`);
   await load();
 }
+async function saveCounts(link) {
+  await http.put(`/manage/links/${link.id}`, { favorite_count: link.favorite_count, recommend_count: link.recommend_count });
+}
+async function savePointRule() {
+  const { data } = await http.put("/manage/point-rule", { points_per_link: pointsPerLink.value });
+  pointsPerLink.value = data.points_per_link;
+}
+async function saveLevel(row) {
+  await http.put(`/manage/levels/${row.level}`, { min_points: row.min_points, proxy_per_minute: row.proxy_per_minute });
+}
+async function dropProxy(url) {
+  await http.delete("/manage/proxies", { params: { url } });
+  await load();
+}
+async function dropSource(url) {
+  await http.delete("/manage/proxy-sources", { params: { url } });
+  await load();
+}
 async function setPlan(user, plan) {
   await http.put(`/manage/users/${user.id}`, { plan, days: 30 });
   await load();
@@ -131,10 +186,17 @@ async function setPlan(user, plan) {
 
 <template>
   <p v-if="missing" class="page">Not found.</p>
-  <div v-else-if="!ready" class="page">
-    <p>{{ error || "Checking the console address…" }}</p>
-    <p><a href="/login">Log in</a> with the admin account first. Administrators must complete the authenticator step below.</p>
-  </div>
+  <form v-else-if="needConsole" class="page form" @submit.prevent="consoleLogin">
+    <h1>管理后台登录</h1>
+    <input v-model="consoleEmail" type="email" placeholder="邮箱" required />
+    <input v-model="consolePassword" type="password" placeholder="密码" required />
+    <input v-model="consoleCode" placeholder="验证器验证码，未开启可留空" />
+    <button class="primary" type="submit">登录后台</button>
+    <p v-if="error === 'totp required'">这个账号已开启验证器，请填写验证码。</p>
+    <p v-else-if="error === 'invalid credentials'">邮箱或密码不正确。</p>
+    <p v-else-if="error">{{ error }}</p>
+  </form>
+  <div v-else-if="!ready" class="page">Checking the console address…</div>
   <div v-else class="admin">
     <h1>Console</h1>
     <div v-if="!me.totp_enabled || !me.totp_ok">
@@ -152,6 +214,8 @@ async function setPlan(user, plan) {
         <button class="text-btn" @click="section = 'ads'">Ads</button>
         <button class="text-btn" @click="section = 'crawl'">Crawl</button>
         <button class="text-btn" @click="section = 'users'">Users</button>
+        <button class="text-btn" @click="section = 'proxies'">Proxies</button>
+        <button class="text-btn" @click="section = 'levels'">Levels</button>
       </div>
       <form v-if="section === 'links'" class="form" @submit.prevent="saveLink">
         <select v-model="linkForm.category_id">
@@ -166,7 +230,12 @@ async function setPlan(user, plan) {
         <label><input type="checkbox" v-model="linkForm.is_hot" /> Hot</label>
         <button class="primary">Add link</button>
         <table>
-          <tr v-for="link in links" :key="link.id"><td>{{ link.title_en }}</td><td>{{ link.status }}</td><td>{{ link.url }}</td></tr>
+          <tr v-for="link in links" :key="link.id">
+            <td>{{ link.title_zh || link.title_en }}</td>
+            <td><input v-model.number="link.favorite_count" type="number" min="0" /></td>
+            <td><input v-model.number="link.recommend_count" type="number" min="0" /></td>
+            <td><button type="button" @click="saveCounts(link)">保存次数</button></td>
+          </tr>
         </table>
       </form>
       <form v-if="section === 'structure'" class="form" @submit.prevent="saveTab">
@@ -229,6 +298,32 @@ async function setPlan(user, plan) {
           </tr>
         </table>
       </form>
+      <div v-if="section === 'levels'" class="form">
+        <p>0 到 10 级。积分达到该级门槛后自动升级，每分钟代理次数跟着当前等级走。站内已有的相同网址不加分。</p>
+        <label>每个有效链接获得的积分</label>
+        <input v-model.number="pointsPerLink" type="number" min="1" />
+        <button type="button" @click="savePointRule">保存积分</button>
+        <table>
+          <tr v-for="row in levels" :key="row.level">
+            <td>Lv.{{ row.level }}</td>
+            <td><input v-model.number="row.min_points" type="number" /></td>
+            <td><input v-model.number="row.proxy_per_minute" type="number" /></td>
+            <td><button type="button" @click="saveLevel(row)">保存</button></td>
+          </tr>
+        </table>
+      </div>
+      <div v-if="section === 'proxies'" class="form">
+        <p>可用代理 {{ proxies.count }} 条，来源 {{ proxies.sources }} 个。每 3 分钟检测，失效的会删掉。</p>
+        <p v-if="proxies.note">{{ proxies.note }}</p>
+        <h2>可用代理</h2>
+        <table>
+          <tr v-for="item in proxies.items" :key="item.url"><td>{{ item.url }}</td><td>{{ item.checked_at }}</td><td><button type="button" @click="dropProxy(item.url)">删除</button></td></tr>
+        </table>
+        <h2>来源</h2>
+        <table>
+          <tr v-for="item in proxies.source_items" :key="item.url"><td>{{ item.url }}</td><td><button type="button" @click="dropSource(item.url)">删除</button></td></tr>
+        </table>
+      </div>
       <table v-if="section === 'users'">
         <tr v-for="user in users" :key="user.id">
           <td>{{ user.email }}</td>

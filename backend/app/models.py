@@ -12,12 +12,14 @@ class User(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     email: Mapped[str] = mapped_column(String(255), unique=True, index=True)
     display_name: Mapped[str] = mapped_column(String(80), default="")
+    proxy_token: Mapped[str] = mapped_column(String(80), default="")
     password_hash: Mapped[str] = mapped_column(String(255))
     role: Mapped[str] = mapped_column(String(20), default="user")
     plan: Mapped[str] = mapped_column(String(20), default="free")
     plan_expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     totp_secret: Mapped[str] = mapped_column(String(64), default="")
     totp_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    points: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
@@ -59,6 +61,7 @@ class Link(Base):
     description_en: Mapped[str] = mapped_column(Text, default="")
     description_zh: Mapped[str] = mapped_column(Text, default="")
     url: Mapped[str] = mapped_column(String(500))
+    norm_url: Mapped[str] = mapped_column(String(500), default="", index=True)
     logo_url: Mapped[str] = mapped_column(String(500), default="")
     attachment_url: Mapped[str] = mapped_column(String(500), default="")
     is_free: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -67,9 +70,38 @@ class Link(Base):
     status: Mapped[str] = mapped_column(String(20), default="published")
     source: Mapped[str] = mapped_column(String(20), default="admin")
     submitter_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    favorite_count: Mapped[int] = mapped_column(Integer, default=0)
+    recommend_count: Mapped[int] = mapped_column(Integer, default=0)
+    click_count: Mapped[int] = mapped_column(Integer, default=0)
+    counts_ready: Mapped[bool] = mapped_column(Boolean, default=False)
+    clicks_ready: Mapped[bool] = mapped_column(Boolean, default=False)
     sort: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     category: Mapped[Category] = relationship(back_populates="links")
+
+
+class Level(Base):
+    __tablename__ = "levels"
+
+    level: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False)
+    min_points: Mapped[int] = mapped_column(Integer, default=0)
+    proxy_per_minute: Mapped[int] = mapped_column(Integer, default=10)
+
+
+class PointRule(Base):
+    __tablename__ = "point_rules"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    points_per_link: Mapped[int] = mapped_column(Integer, default=1)
+
+
+class LinkMark(Base):
+    __tablename__ = "link_marks"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    link_id: Mapped[int] = mapped_column(ForeignKey("links.id", ondelete="CASCADE"))
+    kind: Mapped[str] = mapped_column(String(20))
 
 
 class Ad(Base):

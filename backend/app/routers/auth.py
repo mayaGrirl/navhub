@@ -95,12 +95,8 @@ def login(body: Creds, response: Response, db: Session = Depends(db_session)):
     if not user or not verify_password(body.password, user.password_hash):
         record_failure(email)
         raise HTTPException(status_code=401, detail="invalid credentials")
-    if user.totp_enabled and not check_totp(user.totp_secret, body.totp):
-        record_failure(email)
-        raise HTTPException(status_code=401, detail="totp required")
     clear_failure(email)
-    totp_ok = user.totp_enabled
-    token = new_session(user.id, user.role, totp_ok)
+    token = new_session(user.id, user.role, False)
     _cookie(response, token)
     return {
         "id": user.id,
@@ -108,8 +104,28 @@ def login(body: Creds, response: Response, db: Session = Depends(db_session)):
         "role": user.role,
         "plan": plan_active(user),
         "totp_enabled": user.totp_enabled,
-        "totp_ok": totp_ok,
+        "totp_ok": False,
     }
+
+
+@router.post("/console")
+def console_login(body: Creds, response: Response, db: Session = Depends(db_session)):
+    email = _email(body.email)
+    if not rate_limit(f"console:{email}", 10, 900):
+        raise HTTPException(status_code=429, detail="too many requests")
+    if lock_until(email):
+        raise HTTPException(status_code=423, detail="temporarily locked")
+    user = db.scalar(select(User).where(User.email == email))
+    if not user or user.role != "admin" or not verify_password(body.password, user.password_hash):
+        record_failure(email)
+        raise HTTPException(status_code=401, detail="invalid credentials")
+    if user.totp_enabled and not check_totp(user.totp_secret, body.totp):
+        record_failure(email)
+        raise HTTPException(status_code=401, detail="totp required")
+    clear_failure(email)
+    token = new_session(user.id, user.role, user.totp_enabled)
+    _cookie(response, token)
+    return {"id": user.id, "email": user.email, "totp_enabled": user.totp_enabled, "totp_ok": user.totp_enabled}
 
 
 @router.post("/logout")

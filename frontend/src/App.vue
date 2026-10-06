@@ -9,6 +9,7 @@
     </button>
     <div v-if="menuOpen" class="nav-links open">
       <a href="/" @click="menuOpen = false">{{ locale === "zh" ? "首页" : "Home" }}</a>
+      <a :href="user ? '/submit?tab=proxy' : '/login?next=' + encodeURIComponent('/submit?tab=proxy')" @click="menuOpen = false">{{ t("proxyPool") }}</a>
       <a v-if="user" href="/submit" @click="menuOpen = false">{{ t("center") }}</a>
       <button class="text-btn" type="button" @click="setLocale(locale === 'en' ? 'zh' : 'en')">{{ locale === "en" ? "中文" : "EN" }}</button>
       <a v-if="!user" href="/login" @click="menuOpen = false">{{ t("login") }}</a>

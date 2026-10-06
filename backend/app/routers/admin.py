@@ -1,12 +1,13 @@
 from datetime import datetime, timedelta
 
+import httpx
 from fastapi import APIRouter, Cookie, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.crawl import fetch_meta
 from app.deps import db_session, require_admin, require_admin_setup
-from app.models import Ad, Announcement, Category, CrawlItem, CrawlJob, Link, Page, Tab, User
+from app.models import Ad, Announcement, Category, CrawlItem, CrawlJob, Level, Link, Page, PointRule, Tab, User
 router = APIRouter(prefix="/api/manage", tags=["admin"], dependencies=[Depends(require_admin)])
 setup_router = APIRouter(prefix="/api/manage", tags=["admin"])
 
@@ -161,6 +162,8 @@ def _link(row: Link) -> dict:
         "status": row.status,
         "source": row.source,
         "sort": row.sort,
+        "favorite_count": row.favorite_count or 0,
+        "recommend_count": row.recommend_count or 0,
     }
 
 
@@ -210,6 +213,10 @@ def update_link(link_id: int, payload: dict, db: Session = Depends(db_session)):
             setattr(row, key, bool(payload[key]))
     if "sort" in payload:
         row.sort = int(payload["sort"])
+    for key in ("favorite_count", "recommend_count"):
+        if key in payload:
+            setattr(row, key, max(0, int(payload[key] or 0)))
+            row.counts_ready = True
     db.commit()
     return _link(row)
 
@@ -432,4 +439,78 @@ def approve(item_id: int, db: Session = Depends(db_session)):
     item.status = "approved"
     db.add(link)
     db.commit()
+    return {"ok": True}
+
+
+def _pool():
+    from app.config import settings
+
+    return (settings.proxy_pool_url or "").rstrip("/")
+
+
+@router.get("/levels")
+def list_levels(db: Session = Depends(db_session)):
+    rows = db.scalars(select(Level).where(Level.level <= 10).order_by(Level.level)).all()
+    rule = db.get(PointRule, 1)
+    return {
+        "points_per_link": rule.points_per_link if rule else 1,
+        "levels": [{"level": r.level, "min_points": r.min_points, "proxy_per_minute": r.proxy_per_minute} for r in rows],
+    }
+
+
+@router.put("/levels/{level}")
+def save_level(level: int, payload: dict, db: Session = Depends(db_session)):
+    row = db.get(Level, level)
+    if not row:
+        raise HTTPException(404, "not found")
+    row.min_points = int(payload.get("min_points") or 0)
+    row.proxy_per_minute = int(payload.get("proxy_per_minute") or 1)
+    db.commit()
+    return {"ok": True}
+
+
+@router.put("/point-rule")
+def save_point_rule(payload: dict, db: Session = Depends(db_session)):
+    row = db.get(PointRule, 1) or PointRule(id=1)
+    row.points_per_link = max(1, int(payload.get("points_per_link") or 1))
+    db.add(row)
+    db.commit()
+    return {"points_per_link": row.points_per_link}
+
+
+@router.get("/proxies")
+def proxies():
+    base = _pool()
+    empty = {"count": 0, "sources": 0, "items": [], "source_items": [], "note": "proxy pool is not running"}
+    if not base:
+        empty["note"] = "PROXY_POOL_URL is empty"
+        return empty
+    try:
+        alive = httpx.get(f"{base}/alive", timeout=8)
+        sources = httpx.get(f"{base}/sources", timeout=8)
+        alive.raise_for_status()
+        sources.raise_for_status()
+        data = alive.json()
+        data["source_items"] = sources.json().get("items", [])
+        data["sources"] = len(data["source_items"]) or data.get("sources", 0)
+        return data
+    except httpx.HTTPError:
+        return empty
+
+
+@router.delete("/proxies")
+def remove_proxy(url: str):
+    base = _pool()
+    if not base:
+        raise HTTPException(status_code=400, detail="proxy pool is not running")
+    httpx.delete(f"{base}/proxies", params={"url": url}, timeout=8)
+    return {"ok": True}
+
+
+@router.delete("/proxy-sources")
+def remove_proxy_source(url: str):
+    base = _pool()
+    if not base:
+        raise HTTPException(status_code=400, detail="proxy pool is not running")
+    httpx.delete(f"{base}/sources", params={"url": url}, timeout=8)
     return {"ok": True}

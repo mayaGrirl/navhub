@@ -73,32 +73,53 @@ def fetch_total() -> list[dict]:
     return rows
 
 
+def _fit(row: dict) -> dict:
+    return {
+        "repo_name": (row.get("repo_name") or "")[:160],
+        "description": (row.get("description") or "")[:2000],
+        "stars": (row.get("stars") or "")[:40],
+        "language": (row.get("language") or "")[:40],
+        "position": int(row.get("position") or 0),
+    }
+
+
+def _replace(db, period: str, rows: list[dict]) -> None:
+    if not rows:
+        return
+    db.execute(delete(GithubRank).where(GithubRank.period == period))
+    for row in rows:
+        db.add(GithubRank(period=period, **_fit(row)))
+    db.commit()
+
+
 def refresh_ranks() -> dict:
     db = SessionLocal()
     saved = {}
     try:
         for period, since in PERIODS.items():
-            rows = fetch_period(since)
-            if not rows:
-                continue
-            db.execute(delete(GithubRank).where(GithubRank.period == period))
-            for row in rows:
-                db.add(GithubRank(period=period, **row))
-            saved[period] = len(rows)
-        total = fetch_total()
-        if total:
-            db.execute(delete(GithubRank).where(GithubRank.period == "total"))
-            for row in total:
-                db.add(GithubRank(period="total", **row))
-            saved["total"] = len(total)
-        db.commit()
+            try:
+                rows = fetch_period(since)
+                _replace(db, period, rows)
+                if rows:
+                    saved[period] = len(rows)
+            except Exception as exc:
+                db.rollback()
+                print("github period failed", period, exc.__class__.__name__)
+        try:
+            total = fetch_total()
+            _replace(db, "total", total)
+            if total:
+                saved["total"] = len(total)
+        except Exception as exc:
+            db.rollback()
+            print("github total failed", exc.__class__.__name__)
     finally:
         db.close()
     return saved
 
 
 def _star_count(text: str) -> int:
-    digits = re.sub(r"[^0-9]", "", text or "")
+    digits = re.sub(r"[^0-9]", "", str(text or ""))
     return int(digits or 0)
 
 
