@@ -17,10 +17,13 @@ const confirmPassword = ref("");
 
 const ads = ref([]);
 const tree = ref([]);
+const tabId = ref("");
 const categoryId = ref("");
 const title = ref("");
 const url = ref("");
+const logoUrl = ref("");
 const description = ref("");
+const categories = computed(() => tree.value.find((item) => item.id === tabId.value)?.categories || []);
 
 const initial = computed(() => (name.value || user.value?.email || "?").slice(0, 1).toUpperCase());
 
@@ -41,8 +44,15 @@ onMounted(async () => {
   const data = treeRes.data;
   ads.value = adRes.data.filter((item) => item.slot === "account-1" || item.slot === "account-2");
   tree.value = data.filter((item) => item.kind === "links");
+  tabId.value = tree.value[0]?.id || "";
   categoryId.value = tree.value[0]?.categories[0]?.id || "";
 });
+
+function pickTab(id) {
+  tabId.value = id;
+  const next = tree.value.find((item) => item.id === id);
+  categoryId.value = next?.categories[0]?.id || "";
+}
 
 async function saveProfile() {
   notice.value = "";
@@ -78,11 +88,13 @@ async function send() {
       title_en: title.value,
       title_zh: title.value,
       url: url.value,
+      logo_url: logoUrl.value,
       description_en: description.value,
       description_zh: description.value,
     });
     title.value = "";
     url.value = "";
+    logoUrl.value = "";
     description.value = "";
     notice.value = t("submitted");
   } catch (err) {
@@ -120,13 +132,18 @@ async function send() {
     <form v-else class="page form" @submit.prevent="send">
       <h1>{{ t("submit") }}</h1>
       <label>{{ t("category") }}</label>
-      <select v-model="categoryId">
-        <optgroup v-for="item in tree" :key="item.id" :label="item.title">
-          <option v-for="cat in item.categories" :key="cat.id" :value="cat.id">{{ cat.title }}</option>
-        </optgroup>
-      </select>
+      <div class="pick-tabs">
+        <button v-for="item in tree" :key="item.id" type="button" :class="{ on: item.id === tabId }" @click="pickTab(item.id)">{{ item.title }}</button>
+      </div>
+      <div class="pick-cats">
+        <button v-for="cat in categories" :key="cat.id" type="button" :class="{ on: cat.id === categoryId }" @click="categoryId = cat.id">{{ cat.title }}</button>
+      </div>
       <input v-model="title" :placeholder="t('linkName')" required />
       <input v-model="url" :placeholder="t('linkUrl')" required />
+      <div class="logo-row">
+        <img v-if="logoUrl" :src="logoUrl" alt="" referrerpolicy="no-referrer" />
+        <input v-model="logoUrl" :placeholder="t('logoUrl')" />
+      </div>
       <textarea v-model="description" rows="4" :placeholder="t('linkDesc')"></textarea>
       <button class="primary" type="submit">{{ t("submit") }}</button>
       <p v-if="notice">{{ notice }}</p>
