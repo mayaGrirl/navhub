@@ -7,6 +7,7 @@ from sqlalchemy import select
 
 from app.db import SessionLocal
 from app.models import Category, Link, Tab
+from app.urls import norm_url
 
 CATALOG = {
     "ai": {
@@ -143,7 +144,8 @@ def refresh() -> int:
                 if not category:
                     continue
                 for url, name in sites:
-                    if db.scalar(select(Link).where(Link.category_id == category.id, Link.url == url)):
+                    key = norm_url(url)
+                    if db.scalar(select(Link.id).where(Link.norm_url == key)):
                         continue
                     db.add(
                         Link(
@@ -153,10 +155,13 @@ def refresh() -> int:
                             description_en="Official or public page.",
                             description_zh="公开站点。",
                             url=url,
+                            norm_url=key,
                             logo_url=favicon(url),
                             status="published",
                             source="crawl",
                             is_hot=True,
+                            counts_ready=True,
+                            clicks_ready=True,
                         )
                     )
                     added += 1
@@ -173,12 +178,20 @@ def schedule_directory() -> None:
         while True:
             try:
                 from crawl_boards import sync
+                from app.seed import ensure_misc, ensure_world
 
+                db = SessionLocal()
+                try:
+                    ensure_misc(db)
+                    ensure_world(db)
+                    db.commit()
+                finally:
+                    db.close()
                 refresh()
                 sync()
             except Exception as exc:
                 print("directory sync failed", exc.__class__.__name__)
-            time.sleep(60 * 60 * 24 * 3)
+            time.sleep(60 * 60 * 24 * 2)
 
     threading.Thread(target=loop, daemon=True).start()
 

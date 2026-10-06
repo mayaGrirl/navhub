@@ -11,6 +11,7 @@ from sqlalchemy import select
 
 from app.db import SessionLocal
 from app.models import Category, Link, Tab
+from app.urls import norm_url
 
 HEADERS = {"User-Agent": "Mozilla/5.0"}
 SKIP_HOSTS = ("amz123.com", "tt123.com", "theporndude.com")
@@ -100,7 +101,9 @@ def sections(html: str, mapping: dict[str, str]) -> list[tuple[str, str, str, st
 
 
 def existing_urls(db) -> set[str]:
-    return set(db.scalars(select(Link.url)).all())
+    known = set(db.scalars(select(Link.url)).all())
+    known.update(item for item in db.scalars(select(Link.norm_url)).all() if item)
+    return known
 
 
 def insert_rows(db, tab_slug: str, rows: list[tuple], known: set[str]) -> list[int]:
@@ -109,7 +112,8 @@ def insert_rows(db, tab_slug: str, rows: list[tuple], known: set[str]) -> list[i
         return []
     ids = []
     for slug, title, url, intro in rows:
-        if url in known:
+        key = norm_url(url)
+        if url in known or key in known:
             continue
         category = db.scalar(select(Category).where(Category.tab_id == tab.id, Category.slug == slug))
         if not category:
@@ -121,13 +125,17 @@ def insert_rows(db, tab_slug: str, rows: list[tuple], known: set[str]) -> list[i
             description_en=intro,
             description_zh=intro,
             url=url,
+            norm_url=key,
             logo_url=favicon(url),
             status="published",
             source="crawl",
+            counts_ready=True,
+            clicks_ready=True,
         )
         db.add(link)
         db.flush()
         known.add(url)
+        known.add(key)
         ids.append(link.id)
     return ids
 

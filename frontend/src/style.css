@@ -216,9 +216,12 @@ button, input, textarea, select { font: inherit; }
 .account-side button, .account-side a { text-align: left; border: 0; background: transparent; border-radius: 8px; padding: 8px 10px; color: #374151; }
 .account-side button.on { background: #e8f6ee; color: #14643f; font-weight: 700; }
 .account .form { max-width: none; }
-.pick-tabs, .pick-cats { display: flex; flex-wrap: wrap; gap: 8px; }
-.pick-tabs button, .pick-cats button { border: 1px solid #d7e3dc; background: #fff; border-radius: 999px; padding: 6px 12px; color: #374151; cursor: pointer; }
-.pick-tabs button.on, .pick-cats button.on { background: #14643f; border-color: #14643f; color: #fff; }
+.pick-tabs, .pick-cats { display: flex; flex-wrap: wrap; gap: 8px; padding: 10px; border-radius: 14px; }
+.pick-tabs { background: linear-gradient(135deg, #e7f6ee 0%, #d5efe4 55%, #c7e7d8 100%); }
+.pick-cats { background: linear-gradient(135deg, #f7f4ee 0%, #efe6d6 55%, #e7dcc8 100%); }
+.pick-tabs button, .pick-cats button { border: 1px solid transparent; background: rgba(255, 255, 255, 0.82); border-radius: 999px; padding: 6px 12px; color: #374151; cursor: pointer; }
+.pick-tabs button.on { background: linear-gradient(135deg, #1f8a56, #14643f); border-color: transparent; color: #fff; }
+.pick-cats button.on { background: linear-gradient(135deg, #c4a36a, #8d6a32); border-color: transparent; color: #fff; }
 .logo-row { display: flex; align-items: center; gap: 10px; }
 .logo-row img { width: 42px; height: 42px; border-radius: 10px; object-fit: cover; background: #eef2f6; }
 .logo-row input { flex: 1; }
@@ -254,7 +257,9 @@ button, input, textarea, select { font: inherit; }
 .admin table { width: 100%; border-collapse: collapse; background: white; }
 .admin td, .admin th { border-bottom: 1px solid #eee; padding: 8px; text-align: left; font-size: 13px; }
 @media (max-width: 860px) {
+  html, body { overflow-x: hidden; max-width: 100%; touch-action: pan-y; }
   body { padding-bottom: 28px; }
+  .shell { overflow-x: hidden; max-width: 100%; }
   .top { height: auto; flex-wrap: wrap; gap: 10px; padding: 10px 12px; }
   .phone-back, .global-menu { display: block; position: fixed; top: 8px; z-index: 20; }
   .phone-back { left: 8px; width: 40px; height: 40px; border: 0; border-radius: 10px; background: #fff; color: #1a1d23; box-shadow: 0 4px 14px rgba(20, 32, 54, 0.08); cursor: pointer; display: grid; place-items: center; }
@@ -272,17 +277,20 @@ button, input, textarea, select { font: inherit; }
   .tabs { order: 3; }
   .mast { grid-template-columns: 1fr; gap: 14px; padding: 14px 12px 18px; }
   .finder, .web-search { width: 100%; max-width: none; }
-  .shell, .top, .mast, .portal, .foot { max-width: 100%; }
-  .portal { grid-template-columns: minmax(0, 1fr); padding: 10px 12px 24px; }
+  .shell, .top, .mast, .portal, .foot { max-width: 100%; width: 100%; }
+  .mast, .portal { grid-template-columns: minmax(0, 1fr); overflow-x: hidden; }
+  .portal { padding: 10px 12px 24px; }
   .portal > * { min-width: 0; max-width: 100%; }
   .story h3, .story p, .card h3, .card p, .rank span { overflow-wrap: anywhere; }
+  .tabs { flex-wrap: wrap; overflow: hidden; }
   .side-jump {
     position: static;
     max-height: none;
     width: 100%;
     display: flex;
+    flex-wrap: wrap;
     gap: 6px;
-    overflow-x: auto;
+    overflow: hidden;
     padding: 8px;
     background: #fff;
     border: 1px solid #e6e8ee;
@@ -305,7 +313,7 @@ button, input, textarea, select { font: inherit; }
   .account, .account.has-ads { grid-template-columns: 1fr; width: calc(100% - 24px); margin: 64px auto 24px; }
   .account-side { padding: 18px 14px 12px; }
   .account-who { padding-top: 6px; }
-  .pick-tabs, .pick-cats { flex-wrap: nowrap; overflow-x: auto; }
+  .pick-tabs, .pick-cats { flex-wrap: wrap; overflow: hidden; }
   .pick-tabs button, .pick-cats button { flex: none; }
   .logo-row { flex-wrap: wrap; }
   .logo-row input { width: 100%; min-width: 0; }

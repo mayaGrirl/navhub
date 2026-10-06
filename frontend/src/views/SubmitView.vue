@@ -257,10 +257,11 @@ async function send() {
     </section>
     <form v-else-if="tab === 'submit'" class="page form" @submit.prevent="send">
       <h1>{{ t("submit") }}</h1>
-      <label>{{ t("category") }}</label>
+      <label>{{ locale === "zh" ? "一级栏目" : "Section" }}</label>
       <div class="pick-tabs">
         <button v-for="item in tree" :key="item.id" type="button" :class="{ on: item.id === tabId }" @click="pickTab(item.id)">{{ item.title }}</button>
       </div>
+      <label>{{ locale === "zh" ? "二级分类" : "Category" }}</label>
       <div class="pick-cats">
         <button v-for="cat in categories" :key="cat.id" type="button" :class="{ on: cat.id === categoryId }" @click="categoryId = cat.id">{{ cat.title }}</button>
       </div>
