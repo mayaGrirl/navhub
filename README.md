@@ -62,7 +62,7 @@ GRANT ALL ON navhub.* TO 'nav'@'%';
 
 接口第一次启动会建表，并写入栏目、等级和目录种子。管理员账号来自下面的 `.env`。
 
-如果手里已有本地备份 `backups/nav-local.sql`，可以跳过空库种子，直接导入。这个文件包含 `navhub`（站点）和 `navproxy`（代理池），导入时会自己建库：
+仓库里的 `backups/nav-local.sql` 是一份初始化数据，包含 `navhub`（站点）和 `navproxy`（代理池）。导入时会自己建库，可以跳过空库种子：
 
 ```bash
 mysql -h 127.0.0.1 -P 3306 -u root -p --default-character-set=utf8mb4 < backups/nav-local.sql
