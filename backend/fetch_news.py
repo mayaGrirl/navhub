@@ -135,6 +135,7 @@ def main() -> None:
 
 def schedule_news() -> None:
     def loop():
+        time.sleep(2 * 60)
         while True:
             try:
                 main()

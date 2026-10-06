@@ -122,6 +122,7 @@ def load_ranks(period: str) -> list[dict]:
 
 def schedule_daily() -> None:
     def loop():
+        time.sleep(20 * 60)
         while True:
             try:
                 print("github ranks", refresh_ranks())

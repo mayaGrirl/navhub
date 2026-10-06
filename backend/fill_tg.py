@@ -50,7 +50,7 @@ def clean_tme(url: str) -> str:
 
 
 def get(url: str) -> str:
-    response = httpx.get(url, timeout=40, follow_redirects=True, headers=HEADERS)
+    response = httpx.get(url, timeout=60, follow_redirects=True, headers=HEADERS)
     response.raise_for_status()
     return response.text
 
@@ -165,7 +165,13 @@ def from_tgnav() -> list[tuple[str, str, str]]:
 
 
 def main() -> None:
-    buckets = {"dianbao": from_dianbao(), "github": from_github(), "tgnav": from_tgnav()}
+    buckets = {}
+    for name, loader in (("dianbao", from_dianbao), ("github", from_github), ("tgnav", from_tgnav)):
+        try:
+            buckets[name] = loader()
+        except Exception as exc:
+            print("skip", name, exc.__class__.__name__)
+            buckets[name] = []
     db = SessionLocal()
     tab = db.scalar(select(Tab).where(Tab.slug == "telegram"))
     order = max([row.sort for row in db.scalars(select(Category).where(Category.tab_id == tab.id))] or [0]) + 1

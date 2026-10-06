@@ -9,7 +9,7 @@ export default createRouter({
   history: createWebHistory(),
   routes: [
     { path: "/", component: Home },
-    { path: "/about", component: PageView, props: { pageKey: "about" } },
+    { path: "/about", component: AuthView, props: { mode: "login" } },
     { path: "/contact", component: PageView, props: { pageKey: "contact" } },
     { path: "/advertise", component: PageView, props: { pageKey: "advertise" } },
     { path: "/login", component: AuthView, props: { mode: "login" } },

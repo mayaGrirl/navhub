@@ -171,7 +171,11 @@ def main():
     db = SessionLocal()
     tab = db.scalar(select(Tab).where(Tab.slug == "media"))
     added = 0
-    soup = BeautifulSoup(open("dude.html", encoding="utf-8").read(), "html.parser")
+    import httpx
+
+    response = httpx.get("https://theporndude.com/zh", timeout=40, follow_redirects=True, headers={"User-Agent": "Mozilla/5.0"})
+    response.raise_for_status()
+    soup = BeautifulSoup(response.text, "html.parser")
     seen = {}
     for anchor in soup.select("a.link-analytics"):
         cat = anchor.get("data-category") or "Free Porn Tube Sites"

@@ -356,8 +356,6 @@ onUnmounted(() => clearInterval(bannerTimer));
         <p v-else-if="siteWhere === 'top' && siteQuery.trim()" class="site-hits empty">{{ locale === "zh" ? "没有匹配的链接" : "No matching links" }}</p>
       </div>
       <div class="nav-links">
-        <a href="/about">{{ t("about") }}</a>
-        <a href="/contact">{{ t("contact") }}</a>
         <a v-if="user" href="/submit">{{ t("submit") }}</a>
         <button class="text-btn" @click="setLocale(locale === 'en' ? 'zh' : 'en')">{{ locale === "en" ? "中文" : "EN" }}</button>
         <a v-if="!user" href="/login">{{ t("login") }}</a>
@@ -539,10 +537,6 @@ onUnmounted(() => clearInterval(bannerTimer));
           </div>
         </div>
         <div class="foot-info">
-          <p class="foot-links">
-            <a href="/about">{{ t("about") }}</a>
-            <a href="/contact">{{ t("contact") }}</a>
-          </p>
           <p v-if="contact" class="foot-meta">
             <span v-if="contact.email">{{ contact.email }}</span>
             <span v-if="contact.phone">{{ contact.phone }}</span>

@@ -36,7 +36,7 @@ def seed(db: Session) -> str:
     if home:
         home.slug = "general"
         home.title_en = "News"
-        home.title_zh = "综合资讯"
+        home.title_zh = "每日资讯"
         home.kind = "home"
         home.sort = -1
     if db.scalar(select(Tab.id)):
@@ -48,7 +48,7 @@ def seed(db: Session) -> str:
         ("cross-border", "Cross-border", "跨境电商", "links", False, [("sourcing", "Sourcing", "选品")]),
         ("resources", "Resources", "资料", "links", False, [("reports", "Reports", "报告")]),
         ("media", "Media", "媒体", "links", False, [("video", "Video", "视频")]),
-        ("general", "News", "综合资讯", "home", False, []),
+        ("general", "Daily", "每日资讯", "home", False, []),
         ("adult", "Adult", "成人", "links", True, [("sites", "Sites", "站点")]),
     ]
     for index, (slug, en, zh, kind, adult, cats) in enumerate(samples):

@@ -169,12 +169,16 @@ def refresh() -> int:
 
 def schedule_directory() -> None:
     def loop():
+        time.sleep(45 * 60)
         while True:
             try:
+                from crawl_boards import sync
+
                 refresh()
+                sync()
             except Exception as exc:
                 print("directory sync failed", exc.__class__.__name__)
-            time.sleep(60 * 60 * 24)
+            time.sleep(60 * 60 * 24 * 3)
 
     threading.Thread(target=loop, daemon=True).start()
 
