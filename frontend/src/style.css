@@ -179,6 +179,9 @@ button, input, textarea, select { font: inherit; }
 .pick-tabs button.on, .pick-cats button.on { background: #14643f; border-color: #14643f; color: #fff; }
 .logo-row { display: flex; align-items: center; gap: 10px; }
 .logo-row img { width: 42px; height: 42px; border-radius: 10px; object-fit: cover; background: #eef2f6; }
+.logo-row input { flex: 1; }
+.upload-btn { position: relative; flex: none; border: 1px solid #d7e3dc; border-radius: 8px; padding: 10px 12px; cursor: pointer; color: #14643f; }
+.upload-btn input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
 .account label { font-size: 13px; color: #6b7280; }
 .slide { position: relative; height: 42px; border-radius: 999px; background: #f3f6f4; border: 1px solid #d7e3dc; overflow: hidden; touch-action: none; user-select: none; }
 .slide-fill { position: absolute; inset: 0 auto 0 0; background: #d9f2e4; }
@@ -250,6 +253,13 @@ button, input, textarea, select { font: inherit; }
   .to-top { right: 14px; bottom: 18px; }
   .doc, .auth-board, .layout { grid-template-columns: 1fr; width: calc(100% - 24px); }
   .auth-carousel, .auth-carousel .slide, .auth-carousel img { min-height: 180px; height: 180px; }
+  .auth-board .form { scroll-margin-top: 60px; }
   .page { padding: 18px; }
-  .account, .account.has-ads { grid-template-columns: 1fr; }
+  .account, .account.has-ads { grid-template-columns: 1fr; width: calc(100% - 24px); margin: 64px auto 24px; }
+  .account-side { padding: 18px 14px 12px; }
+  .account-who { padding-top: 6px; }
+  .pick-tabs, .pick-cats { flex-wrap: nowrap; overflow-x: auto; }
+  .pick-tabs button, .pick-cats button { flex: none; }
+  .logo-row { flex-wrap: wrap; }
+  .logo-row input { width: 100%; min-width: 0; }
 }

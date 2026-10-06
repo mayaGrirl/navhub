@@ -8,4 +8,5 @@ backend/.venv/
 backend/data/
 .local-mysql/
 frontend/dist/
+frontend/public/uploads/
 .DS_Store

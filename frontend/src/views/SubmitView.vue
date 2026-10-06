@@ -79,6 +79,22 @@ async function savePassword() {
   }
 }
 
+async function uploadLogo(event) {
+  const file = event.target.files?.[0];
+  event.target.value = "";
+  if (!file) return;
+  notice.value = "";
+  const body = new FormData();
+  body.append("file", file);
+  try {
+    const { data } = await http.post("/uploads", body);
+    logoUrl.value = data.url;
+  } catch (err) {
+    const detail = err.response?.data?.detail;
+    notice.value = detail ? t(detail) : t("authFailed");
+  }
+}
+
 async function send() {
   notice.value = "";
   try {
@@ -143,6 +159,7 @@ async function send() {
       <div class="logo-row">
         <img v-if="logoUrl" :src="logoUrl" alt="" referrerpolicy="no-referrer" />
         <input v-model="logoUrl" :placeholder="t('logoUrl')" />
+        <label class="upload-btn">{{ t("uploadIcon") }}<input type="file" accept="image/*" @change="uploadLogo" /></label>
       </div>
       <textarea v-model="description" rows="4" :placeholder="t('linkDesc')"></textarea>
       <button class="primary" type="submit">{{ t("submit") }}</button>

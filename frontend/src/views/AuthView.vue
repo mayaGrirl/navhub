@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, nextTick, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { useI18n } from "vue-i18n";
 import http from "../api";
@@ -15,6 +15,7 @@ const { locale, t } = useI18n();
 const contact = ref(null);
 const about = ref(null);
 const ads = ref([]);
+const formEl = ref(null);
 const mode = computed(() => (route.path === "/register" || props.mode === "register" ? "register" : "login"));
 const captchaId = ref("");
 const captchaProgress = ref(0);
@@ -70,11 +71,23 @@ function dragEnd() {
   if (captchaProgress.value < 96) captchaProgress.value = 0;
 }
 
+async function focusForm() {
+  if (window.innerWidth > 860) return;
+  if (route.path !== "/login" && route.path !== "/register") return;
+  await nextTick();
+  formEl.value?.scrollIntoView({ block: "start" });
+}
+
 watch(locale, load);
-watch(mode, loadCaptcha);
-onMounted(() => {
-  load();
+watch(mode, () => {
   loadCaptcha();
+  focusForm();
+});
+watch(() => route.path, focusForm);
+onMounted(async () => {
+  await load();
+  loadCaptcha();
+  focusForm();
 });
 
 async function send() {
@@ -104,7 +117,7 @@ async function send() {
       <h1>{{ about.title }}</h1>
       <p class="prose">{{ about.body }}</p>
     </article>
-    <form class="page form" @submit.prevent="send">
+    <form ref="formEl" class="page form" @submit.prevent="send">
       <h1>{{ mode === "register" ? t("register") : t("login") }}</h1>
       <input v-model="email" type="email" :placeholder="t('email')" required />
       <input v-model="password" type="password" :placeholder="t('password')" required />

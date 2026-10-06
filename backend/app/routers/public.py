@@ -1,6 +1,8 @@
+import uuid
 from datetime import datetime
+from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
@@ -196,6 +198,23 @@ def github(period: str = "past_24_hours"):
     if period not in {"past_24_hours", "past_week", "past_month", "total"}:
         period = "past_24_hours"
     return load_ranks(period)
+
+
+@router.post("/uploads")
+async def upload_logo(file: UploadFile = File(...), user: User = Depends(require_user)):
+    if not (file.content_type or "").startswith("image/"):
+        raise HTTPException(status_code=400, detail="image required")
+    raw = await file.read()
+    if not raw or len(raw) > 2 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="image required")
+    suffix = Path(file.filename or "").suffix.lower()
+    if suffix not in {".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"}:
+        suffix = ".png"
+    folder = Path(__file__).resolve().parents[3] / "frontend" / "public" / "uploads"
+    folder.mkdir(parents=True, exist_ok=True)
+    name = f"{uuid.uuid4().hex}{suffix}"
+    (folder / name).write_bytes(raw)
+    return {"url": f"/uploads/{name}"}
 
 
 @router.post("/submissions")
