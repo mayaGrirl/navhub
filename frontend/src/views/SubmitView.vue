@@ -157,7 +157,7 @@ async function uploadLogo(event) {
   if (!file) return;
   const ok = ["image/png", "image/jpeg", "image/gif", "image/webp", "image/svg+xml"].includes(file.type) || /\.(png|jpe?g|gif|webp|svg)$/i.test(file.name);
   if (!ok) {
-    notice.value = locale.value === "zh" ? "只支持 PNG、JPG、JPEG、GIF、WEBP、SVG" : "Use PNG, JPG, JPEG, GIF, WEBP, or SVG";
+    notice.value = t("imageFormatsOnly");
     return;
   }
   notice.value = "";
@@ -341,7 +341,7 @@ async function send() {
         <input v-model="logoUrl" :placeholder="t('logoUrl')" @input="onLogoTyping" />
         <label class="upload-btn">{{ t("uploadIcon") }}<input type="file" accept=".png,.jpg,.jpeg,.gif,.webp,.svg,image/png,image/jpeg,image/gif,image/webp,image/svg+xml" @change="uploadLogo" /></label>
       </div>
-      <p class="meta">{{ locale === "zh" ? "本地上传支持格式：PNG、JPG、JPEG、GIF、WEBP、SVG" : "Local upload accepts: PNG, JPG, JPEG, GIF, WEBP, SVG" }}</p>
+      <p class="meta">{{ t("imageFormats") }}</p>
       <textarea v-model="description" rows="4" :placeholder="t('linkDesc')"></textarea>
       <button class="primary" type="submit">{{ t("submit") }}</button>
       </form>
