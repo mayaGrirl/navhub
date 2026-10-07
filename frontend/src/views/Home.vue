@@ -8,6 +8,7 @@ import FeedbackBox from "../components/FeedbackBox.vue";
 const route = useRoute();
 const { t, locale } = useI18n();
 const homeReady = ref(false);
+const boardLoading = ref(false);
 const tabs = ref([]);
 const tabId = ref(null);
 const sections = ref([]);
@@ -163,11 +164,19 @@ async function loadTree() {
 async function loadBoard() {
   if (!currentTab.value || currentTab.value.kind === "home") {
     sections.value = [];
+    boardLoading.value = false;
     return;
   }
-  const { data } = await http.get("/board", { params: { tab_id: currentTab.value.id, locale: locale.value } });
-  sections.value = data;
-  activeSection.value = data[0]?.id || null;
+  boardLoading.value = true;
+  try {
+    const { data } = await http.get("/board", { params: { tab_id: currentTab.value.id, locale: locale.value } });
+    if (currentTab.value?.id && data) {
+      sections.value = data;
+      activeSection.value = data[0]?.id || null;
+    }
+  } finally {
+    boardLoading.value = false;
+  }
 }
 
 function jumpTo(id) {
@@ -260,6 +269,9 @@ function onBannerUp(event) {
 }
 
 function pickTab(id) {
+  if (id === tabId.value) return;
+  const next = tabs.value.find((item) => item.id === id);
+  if (next && next.kind !== "home") boardLoading.value = true;
   tabId.value = id;
 }
 
@@ -578,17 +590,25 @@ onUnmounted(() => {
           </button>
         </template>
         <template v-else>
+          <div v-if="boardLoading" class="skeleton side-wait" aria-busy="true">
+            <i class="bone"></i><i class="bone"></i><i class="bone"></i><i class="bone"></i>
+          </div>
+          <template v-else>
           <p class="side-label">{{ currentTab?.title }}</p>
           <button v-for="section in sections" :key="section.id" :class="{ on: activeSection === section.id }" @click="jumpTo(section.id)">
             <i></i>
             <span>{{ section.title }}</span>
             <em>{{ section.links.length }}</em>
           </button>
+          </template>
         </template>
       </aside>
 
       <main class="panel feed">
-        <template v-if="currentTab?.adult && !adultOk">
+        <div v-if="boardLoading" class="skeleton feed-wait" aria-busy="true" aria-label="loading">
+          <i class="bone tall"></i><i class="bone"></i><i class="bone"></i><i class="bone"></i>
+        </div>
+        <template v-else-if="currentTab?.adult && !adultOk">
           <section class="adult-gate">
             <p class="adult-mark">18+</p>
             <h2>{{ t("adultTitle") }}</h2>

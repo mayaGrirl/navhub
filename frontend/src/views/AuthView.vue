@@ -14,6 +14,7 @@ const error = ref("");
 const { locale, t } = useI18n();
 const contact = ref(null);
 const about = ref(null);
+const authReady = ref(false);
 const ads = ref([]);
 const formEl = ref(null);
 const mode = computed(() => (route.path === "/register" || props.mode === "register" ? "register" : "login"));
@@ -35,15 +36,19 @@ const telegram = computed(() => {
 });
 
 async function load() {
-  const [aboutRes, page, adRes] = await Promise.all([
-    http.get("/pages/about", { params: { locale: locale.value } }),
-    http.get("/pages/contact", { params: { locale: locale.value } }),
-    http.get("/ads", { params: { locale: locale.value } }),
-  ]);
-  about.value = aboutRes.data;
-  contact.value = page.data;
-  const slots = ["about-1", "about-2", "about-3", "auth-1", "auth-2", "auth-3"];
-  ads.value = adRes.data.filter((item) => slots.includes(item.slot));
+  try {
+    const [aboutRes, page, adRes] = await Promise.all([
+      http.get("/pages/about", { params: { locale: locale.value } }),
+      http.get("/pages/contact", { params: { locale: locale.value } }),
+      http.get("/ads", { params: { locale: locale.value } }),
+    ]);
+    about.value = aboutRes.data;
+    contact.value = page.data;
+    const slots = ["about-1", "about-2", "about-3", "auth-1", "auth-2", "auth-3"];
+    ads.value = adRes.data.filter((item) => slots.includes(item.slot));
+  } finally {
+    authReady.value = true;
+  }
 }
 
 async function loadCaptcha() {
@@ -112,7 +117,11 @@ async function send() {
 </script>
 
 <template>
-  <div class="auth-board">
+  <div v-if="!authReady" class="auth-board skeleton" aria-busy="true" aria-label="loading">
+    <article class="page"><i class="bone tall"></i><i class="bone"></i><i class="bone"></i></article>
+    <article class="page"><i class="bone"></i><i class="bone"></i><i class="bone"></i><i class="bone tall"></i></article>
+  </div>
+  <div v-else class="auth-board">
     <article class="page" v-if="about">
       <a class="brand" href="/"><img src="/logo.svg" alt="" />NEXA</a>
       <h1>{{ about.title }}</h1>

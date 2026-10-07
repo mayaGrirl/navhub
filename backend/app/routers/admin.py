@@ -1111,9 +1111,10 @@ def update_feedback(feedback_id: int, payload: dict, db: Session = Depends(db_se
         raise HTTPException(400, "状态不正确")
     note = (payload.get("note") or "").strip()
     changed = status != row.status
-    row.status = status
-    row.updated_at = datetime.utcnow()
+    if changed:
+        row.status = status
     if changed or note:
+        row.updated_at = datetime.utcnow()
         text = f"状态更新为{labels[status]}" if changed else ""
         if note:
             text = f"{text}\n{note}".strip()

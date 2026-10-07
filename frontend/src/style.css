@@ -431,6 +431,8 @@ button, input, textarea, select { font: inherit; }
 .console-main .tag.warn { background: #fff4e5; color: #b54708; }
 .skeleton .bone { display: block; height: 64px; margin: 0 0 12px; border-radius: 10px; background: linear-gradient(90deg, #eef1f4 25%, #f7f9fb 37%, #eef1f4 63%); background-size: 400% 100%; animation: bone 1.2s ease infinite; }
 .skeleton .bone.tall { height: 180px; }
+.feed-wait, .side-wait { padding: 8px 0; }
+.auth-board.skeleton .page { display: block; }
 @keyframes bone { from { background-position: 100% 0; } to { background-position: 0 0; } }
 .boot-card { display: grid; justify-items: center; gap: 10px; color: #344054; }
 .boot-card img { width: 48px; height: 48px; }

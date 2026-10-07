@@ -279,6 +279,7 @@ const mailTab = ref("channels");
 const feedbackRows = ref([]);
 const feedbackCurrent = ref(null);
 const feedbackNote = ref("");
+const feedbackStatus = ref("pending");
 const me = ref(null);
 const userOpen = ref(false);
 const totp = ref(null);
@@ -963,12 +964,14 @@ function toggleFeedback(row) {
     return;
   }
   feedbackCurrent.value = row;
+  feedbackStatus.value = row.status || "pending";
   feedbackNote.value = "";
 }
 async function saveFeedback() {
   if (!feedbackCurrent.value) return;
-  const { data } = await http.put(`/manage/feedback/${feedbackCurrent.value.id}`, { status: feedbackCurrent.value.status, note: feedbackNote.value });
+  const { data } = await http.put(`/manage/feedback/${feedbackCurrent.value.id}`, { status: feedbackStatus.value, note: feedbackNote.value });
   feedbackNote.value = "";
+  feedbackStatus.value = data.status || "pending";
   feedbackCurrent.value = data;
   notice.value = tx("已保存", "Saved");
   await load();
@@ -1365,7 +1368,7 @@ async function consoleLogout() {
                   <span>{{ (note.created_at || '').slice(0, 16).replace('T', ' ') }}</span>
                   <p>{{ note.body }}</p>
                 </div>
-                <select v-model="feedbackCurrent.status">
+                <select v-model="feedbackStatus">
                   <option value="pending">{{ tx("待处理", "Open") }}</option>
                   <option value="working">{{ tx("处理中", "In progress") }}</option>
                   <option value="done">{{ tx("已完成", "Done") }}</option>
