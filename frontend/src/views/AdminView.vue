@@ -274,6 +274,7 @@ const mailState = ref({ settings: {}, tasks: [], logs: [] });
 const mailForm = ref({ subject: "", body: "", audience: "all", email: "", run_at: "", interval_minutes: 0 });
 const mailTest = ref("");
 const mailHint = ref("");
+const mailTab = ref("test");
 const me = ref(null);
 const totp = ref(null);
 const code = ref("");
@@ -1184,8 +1185,15 @@ async function setProxy(user, payload) {
           <p v-if="error" class="security-error">{{ error === "invalid code" ? tx("验证码不正确，还没有绑定成功。", "That code is not valid, so nothing was changed.") : error }}</p>
         </div>
 
-        <div v-else-if="section === 'mail'" class="security-page mail-page">
-          <article class="security-card">
+        <div v-else-if="section === 'mail'" class="mail-page">
+          <nav class="mail-tabs">
+            <button type="button" :class="{ on: mailTab === 'test' }" @click="mailTab = 'test'">{{ tx("测试", "Test") }}</button>
+            <button type="button" :class="{ on: mailTab === 'channels' }" @click="mailTab = 'channels'">{{ tx("通道", "Channels") }}</button>
+            <button type="button" :class="{ on: mailTab === 'send' }" @click="mailTab = 'send'">{{ tx("发信", "Send") }}</button>
+            <button type="button" :class="{ on: mailTab === 'schedule' }" @click="mailTab = 'schedule'">{{ tx("定时", "Schedule") }}</button>
+            <button type="button" :class="{ on: mailTab === 'logs' }" @click="mailTab = 'logs'">{{ tx("记录", "Log") }}</button>
+          </nav>
+          <article v-if="mailTab === 'test'" class="security-card">
             <header><h3>{{ tx("测试配置", "Test") }}</h3></header>
             <p>{{ tx("填一个收件邮箱，发送一封固定的测试信。成功说明当前打开的通道可用。", "Send one fixed test message. A success means the open channel works.") }}</p>
             <div class="bind-row">
@@ -1194,7 +1202,7 @@ async function setProxy(user, payload) {
             </div>
             <p v-if="mailHint">{{ mailHint }}</p>
           </article>
-          <article class="security-card">
+          <article v-else-if="mailTab === 'channels'" class="security-card">
             <header><h3>{{ tx("发信通道", "Channels") }}</h3></header>
             <p>{{ tx("先 Gmail，失败后再 163。账号写在服务器配置里。", "Gmail first, then 163. Accounts stay in the server config.") }}</p>
             <label class="switch"><input type="checkbox" v-model="mailState.settings.gmail_enabled" @change="saveMail" /><i></i><span>Gmail · {{ mailState.settings.gmail_ready ? tx("已配置", "ready") : tx("未配置", "not set") }}</span></label>
@@ -1203,10 +1211,10 @@ async function setProxy(user, payload) {
             <label class="switch"><input type="checkbox" v-model="mailState.settings.mailgun_enabled" @change="saveMail" /><i></i><span>Mailgun · {{ mailState.settings.mailgun_ready ? tx("已配置", "ready") : tx("未配置", "not set") }}</span></label>
             <label class="switch"><input type="checkbox" v-model="mailState.settings.notify_default" @change="saveMail" /><i></i><span>{{ tx("默认通知邮件", "Default notices") }}</span></label>
           </article>
-          <article class="security-card">
+          <article v-else-if="mailTab === 'send'" class="security-card">
             <header><h3>{{ tx("给用户发信", "Send") }}</h3></header>
             <input v-model="mailForm.subject" :placeholder="tx('标题', 'Subject')" />
-            <textarea v-model="mailForm.body" rows="4" :placeholder="tx('正文', 'Message')"></textarea>
+            <textarea v-model="mailForm.body" rows="6" :placeholder="tx('正文', 'Message')"></textarea>
             <input v-model="mailForm.email" type="email" :placeholder="tx('单个邮箱，留空则群发', 'One address, or leave empty for the group')" />
             <select v-model="mailForm.audience">
               <option value="all">{{ tx("全部会员", "All members") }}</option>
@@ -1215,15 +1223,23 @@ async function setProxy(user, payload) {
             </select>
             <button class="primary" type="button" @click="sendMail">{{ tx("立即发送", "Send now") }}</button>
           </article>
-          <article class="security-card">
+          <article v-else-if="mailTab === 'schedule'" class="security-card">
             <header><h3>{{ tx("定时发送", "Schedule") }}</h3></header>
+            <input v-model="mailForm.subject" :placeholder="tx('标题', 'Subject')" />
+            <textarea v-model="mailForm.body" rows="4" :placeholder="tx('正文', 'Message')"></textarea>
+            <input v-model="mailForm.email" type="email" :placeholder="tx('单个邮箱，留空则群发', 'One address, or leave empty for the group')" />
+            <select v-model="mailForm.audience">
+              <option value="all">{{ tx("全部会员", "All members") }}</option>
+              <option value="vip">VIP</option>
+              <option value="free">{{ tx("免费会员", "Free members") }}</option>
+            </select>
             <input v-model="mailForm.run_at" type="datetime-local" />
             <input v-model.number="mailForm.interval_minutes" type="number" min="0" :placeholder="tx('重复间隔（分钟），0 为只发一次', 'Repeat minutes, 0 sends once')" />
-            <button type="button" @click="addMailTask">{{ tx("加入定时", "Schedule") }}</button>
+            <button class="primary" type="button" @click="addMailTask">{{ tx("加入定时", "Schedule") }}</button>
             <p v-for="task in mailState.tasks" :key="task.id">{{ task.subject }} · {{ (task.run_at || "").replace("T", " ").slice(0, 16) }} <button type="button" @click="dropMailTask(task.id)">{{ tx("删除", "Delete") }}</button></p>
             <p v-if="!mailState.tasks.length">{{ tx("还没有定时任务", "No schedule yet") }}</p>
           </article>
-          <article class="security-card">
+          <article v-else class="security-card">
             <header><h3>{{ tx("最近记录", "Recent") }}</h3></header>
             <p v-for="line in mailState.logs" :key="line.id">{{ (line.created_at || "").slice(0, 16).replace("T", " ") }} {{ line.recipient }} · {{ line.channel }} · {{ line.status }} {{ line.message }}</p>
             <p v-if="!mailState.logs.length">{{ tx("还没有发送记录", "No messages yet") }}</p>

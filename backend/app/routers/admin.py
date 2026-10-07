@@ -1003,13 +1003,18 @@ def save_mail(payload: dict, db: Session = Depends(db_session)):
 
 @router.post("/mail/test")
 def test_mail(payload: dict, db: Session = Depends(db_session)):
-    from app.mailer import deliver
+    from app.mailer import _channels, deliver, mail_row
     email = (payload.get("email") or "").strip()
     if "@" not in email:
         raise HTTPException(400, "填写测试邮箱")
+    channels = [item for item in _channels(mail_row(db)) if item != "log"]
+    if not channels:
+        raise HTTPException(400, "Gmail 和 163 的账号密码还没填写，测试信发不出去")
     channel = deliver(db, email, "NEXA 测试邮件", "这是一封配置测试邮件。收到它，说明当前发信通道可用。")
     last = db.scalars(select(MailLog).order_by(MailLog.id.desc()).limit(1)).first()
-    return {"ok": channel not in {"error", "log"}, "channel": channel, "message": (last.message if last else "") or ("已发送" if channel not in {"error", "log"} else "只记了日志，发信账号还没配好")}
+    if channel == "error":
+        raise HTTPException(400, (last.message if last else "") or "发送失败")
+    return {"ok": True, "channel": channel, "message": "已发送"}
 def send_mail_now(payload: dict, db: Session = Depends(db_session)):
     from app.mailer import deliver, send_bulk
     subject = (payload.get("subject") or "").strip()
