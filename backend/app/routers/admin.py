@@ -7,18 +7,55 @@ from sqlalchemy.orm import Session
 
 from app.crawl import fetch_meta
 from app.deps import db_session, require_admin, require_admin_setup
-from app.models import Ad, AdminAlert, Announcement, Category, CrawlItem, CrawlJob, IpBan, Level, Link, Page, PointRule, Tab, User
+from app.security import hash_password
+from app.models import Ad, AdminAlert, Announcement, AuthLog, Category, CrawlItem, CrawlJob, IpBan, Level, Link, NewsItem, Page, PointRule, Tab, User
 from app.urls import norm_url
 router = APIRouter(prefix="/api/manage", tags=["admin"], dependencies=[Depends(require_admin)])
 setup_router = APIRouter(prefix="/api/manage", tags=["admin"])
 
 
 @setup_router.get("/ping")
-def ping(user: User = Depends(require_admin_setup), nav_session: str | None = Cookie(default=None)):
+def ping(user: User = Depends(require_admin_setup), nav_console: str | None = Cookie(default=None)):
     from app.security import read_session
 
-    data = read_session(nav_session) or {}
+    data = read_session(nav_console) or {}
     return {"ok": True, "totp_enabled": user.totp_enabled, "totp_ok": bool(data.get("totp_ok"))}
+
+
+@setup_router.get("/user-trend")
+def user_trend(grain: str = "day", db: Session = Depends(db_session), _user: User = Depends(require_admin)):
+    now = datetime.utcnow()
+    buckets = []
+    if grain == "month":
+        year, month = now.year, now.month
+        marks = []
+        for _ in range(12):
+            marks.append((year, month))
+            month -= 1
+            if month == 0:
+                month = 12
+                year -= 1
+        for year, month in reversed(marks):
+            start = datetime(year, month, 1)
+            end = datetime(year + 1, 1, 1) if month == 12 else datetime(year, month + 1, 1)
+            buckets.append((start, end, f"{year}-{month:02d}"))
+    else:
+        today = datetime(now.year, now.month, now.day)
+        for offset in range(13, -1, -1):
+            start = today - timedelta(days=offset)
+            buckets.append((start, start + timedelta(days=1), start.strftime("%m-%d")))
+    created = list(db.scalars(select(User.created_at)).all())
+    logins = list(db.scalars(select(AuthLog.created_at).where(AuthLog.kind == "login")).all())
+
+    def count(times, start, end):
+        return sum(1 for item in times if item and start <= item < end)
+
+    return {
+        "labels": [label for _start, _end, label in buckets],
+        "register": [count(created, start, end) for start, end, _label in buckets],
+        "login": [count(logins, start, end) for start, end, _label in buckets],
+        "total": [sum(1 for item in created if item and item < end) for _start, end, _label in buckets],
+    }
 
 
 def _tab(row: Tab) -> dict:
@@ -167,7 +204,15 @@ def _link(row: Link) -> dict:
         "sort": row.sort,
         "favorite_count": row.favorite_count or 0,
         "recommend_count": row.recommend_count or 0,
+        "click_count": row.click_count or 0,
     }
+
+
+@router.get("/link-stats")
+def link_stats(db: Session = Depends(db_session)):
+    rows = db.execute(select(Link.source, Link.id)).all()
+    user = sum(1 for source, _id in rows if source == "user")
+    return {"total": len(rows), "user": user, "system": len(rows) - user}
 
 
 @router.get("/links")
@@ -175,7 +220,7 @@ def list_links(status: str = "", db: Session = Depends(db_session)):
     stmt = select(Link).order_by(Link.id.desc())
     if status:
         stmt = stmt.where(Link.status == status)
-    return [_link(row) for row in db.scalars(stmt.limit(300)).all()]
+    return [_link(row) for row in db.scalars(stmt.limit(1000)).all()]
 
 
 @router.post("/links")
@@ -217,12 +262,35 @@ def update_link(link_id: int, payload: dict, db: Session = Depends(db_session)):
             setattr(row, key, bool(payload[key]))
     if "sort" in payload:
         row.sort = int(payload["sort"])
-    for key in ("favorite_count", "recommend_count"):
+    for key in ("favorite_count", "recommend_count", "click_count"):
         if key in payload:
             setattr(row, key, max(0, int(payload[key] or 0)))
-            row.counts_ready = True
+            if key == "click_count":
+                row.clicks_ready = True
+            else:
+                row.counts_ready = True
     db.commit()
     return _link(row)
+
+
+@router.post("/links/bump")
+def bump_links(payload: dict, db: Session = Depends(db_session)):
+    import random
+
+    field = payload.get("field")
+    if field not in ("favorite_count", "recommend_count", "click_count"):
+        raise HTTPException(400, "bad field")
+    ids = [int(item) for item in (payload.get("ids") or [])]
+    rows = db.scalars(select(Link).where(Link.id.in_(ids))).all() if ids else []
+    for row in rows:
+        added = random.randint(1, 20)
+        setattr(row, field, max(0, (getattr(row, field) or 0) + added))
+        if field == "click_count":
+            row.clicks_ready = True
+        else:
+            row.counts_ready = True
+    db.commit()
+    return {"ok": True, "count": len(rows)}
 
 
 @router.delete("/links/{link_id}")
@@ -300,9 +368,50 @@ def create_ad(payload: dict, db: Session = Depends(db_session)):
     return {"id": row.id}
 
 
+@router.put("/ads/{ad_id}")
+def update_ad(ad_id: int, payload: dict, db: Session = Depends(db_session)):
+    row = db.get(Ad, ad_id)
+    if not row:
+        raise HTTPException(404, "not found")
+    for key in ("slot", "image_url", "link_url", "title_en", "title_zh"):
+        if key in payload:
+            setattr(row, key, payload[key] or "")
+    if "enabled" in payload:
+        row.enabled = bool(payload["enabled"])
+    if "sort" in payload:
+        row.sort = int(payload["sort"] or 0)
+    db.commit()
+    return {"ok": True}
+
+
 @router.delete("/ads/{ad_id}")
 def delete_ad(ad_id: int, db: Session = Depends(db_session)):
     row = db.get(Ad, ad_id)
+    if row:
+        db.delete(row)
+        db.commit()
+    return {"ok": True}
+
+
+@router.get("/news")
+def list_news(db: Session = Depends(db_session)):
+    rows = db.scalars(select(NewsItem).order_by(NewsItem.published_at.desc(), NewsItem.id.desc()).limit(500)).all()
+    return [
+        {
+            "id": r.id,
+            "title": r.title,
+            "url": r.url,
+            "source": r.source,
+            "category": r.category,
+            "published_at": r.published_at.isoformat() if r.published_at else "",
+        }
+        for r in rows
+    ]
+
+
+@router.delete("/news/{item_id}")
+def delete_news(item_id: int, db: Session = Depends(db_session)):
+    row = db.get(NewsItem, item_id)
     if row:
         db.delete(row)
         db.commit()
@@ -332,6 +441,29 @@ def create_announcement(payload: dict, db: Session = Depends(db_session)):
     return {"id": row.id}
 
 
+@router.put("/announcements/{item_id}")
+def update_announcement(item_id: int, payload: dict, db: Session = Depends(db_session)):
+    row = db.get(Announcement, item_id)
+    if not row:
+        raise HTTPException(404, "not found")
+    for key in ("title_en", "title_zh", "body_en", "body_zh"):
+        if key in payload:
+            setattr(row, key, payload[key] or "")
+    if "enabled" in payload:
+        row.enabled = bool(payload["enabled"])
+    db.commit()
+    return {"ok": True}
+
+
+@router.delete("/announcements/{item_id}")
+def delete_announcement(item_id: int, db: Session = Depends(db_session)):
+    row = db.get(Announcement, item_id)
+    if row:
+        db.delete(row)
+        db.commit()
+    return {"ok": True}
+
+
 @router.get("/users")
 def users(db: Session = Depends(db_session)):
     rows = db.scalars(select(User).order_by(User.id.desc()).limit(200)).all()
@@ -351,13 +483,15 @@ def users(db: Session = Depends(db_session)):
 
 
 @router.put("/users/{user_id}")
-def update_user(user_id: int, payload: dict, db: Session = Depends(db_session)):
+def update_user(user_id: int, payload: dict, db: Session = Depends(db_session), actor: User = Depends(require_admin)):
     row = db.get(User, user_id)
     if not row:
         raise HTTPException(404, "not found")
     if "role" in payload:
         row.role = payload["role"]
     if "banned" in payload:
+        if row.id == actor.id and payload["banned"]:
+            raise HTTPException(400, "cannot ban yourself")
         row.banned = bool(payload["banned"])
         if row.last_ip:
             existing = db.scalar(select(IpBan).where(IpBan.ip == row.last_ip))
@@ -373,6 +507,70 @@ def update_user(user_id: int, payload: dict, db: Session = Depends(db_session)):
         else:
             row.plan_expires_at = None
     db.commit()
+    return {"ok": True}
+
+
+@router.post("/admins")
+def create_admin(payload: dict, db: Session = Depends(db_session)):
+    email = (payload.get("email") or "").strip().lower()
+    password = payload.get("password") or ""
+    if "@" not in email or len(password) < 8:
+        raise HTTPException(400, "email or password invalid")
+    if db.scalar(select(User).where(User.email == email)):
+        raise HTTPException(400, "email exists")
+    row = User(email=email, password_hash=hash_password(password), role="admin")
+    db.add(row)
+    db.commit()
+    return {"id": row.id}
+
+
+@router.put("/users/{user_id}/password")
+def reset_password(user_id: int, payload: dict, db: Session = Depends(db_session)):
+    row = db.get(User, user_id)
+    password = payload.get("password") or ""
+    if not row:
+        raise HTTPException(404, "not found")
+    if len(password) < 8:
+        raise HTTPException(400, "password too short")
+    row.password_hash = hash_password(password)
+    db.commit()
+    return {"ok": True}
+
+
+@router.post("/users/{user_id}/reset-totp")
+def reset_totp(user_id: int, db: Session = Depends(db_session)):
+    row = db.get(User, user_id)
+    if not row:
+        raise HTTPException(404, "not found")
+    row.totp_secret = ""
+    row.totp_enabled = False
+    db.commit()
+    return {"ok": True}
+
+
+@router.get("/ip-bans")
+def ip_bans(db: Session = Depends(db_session)):
+    rows = db.scalars(select(IpBan).order_by(IpBan.id.desc()).limit(200)).all()
+    return [{"id": r.id, "ip": r.ip, "reason": r.reason} for r in rows]
+
+
+@router.post("/ip-bans")
+def add_ip_ban(payload: dict, db: Session = Depends(db_session)):
+    ip = (payload.get("ip") or "").strip()[:64]
+    if not ip:
+        raise HTTPException(400, "ip required")
+    if not db.scalar(select(IpBan).where(IpBan.ip == ip)):
+        db.add(IpBan(ip=ip, reason="admin"))
+        db.commit()
+    return {"ok": True}
+
+
+@router.delete("/ip-bans")
+def remove_ip_ban(ip: str, db: Session = Depends(db_session)):
+    row = db.scalar(select(IpBan).where(IpBan.ip == ip))
+    if row:
+        db.delete(row)
+        db.commit()
     return {"ok": True}
 
 

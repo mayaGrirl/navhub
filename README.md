@@ -91,15 +91,13 @@ mysqldump -h 127.0.0.1 -P 3307 -u root --default-character-set=utf8mb4 --single-
 DATABASE_URL=mysql+pymysql://nav:navpass@127.0.0.1:3306/navhub?charset=utf8mb4
 REDIS_URL=redis://127.0.0.1:6379/0
 SECRET_KEY=change-this-secret
-ADMIN_EMAIL=admin@example.com
-ADMIN_PASSWORD=change-me-now
 CORS_ORIGINS=http://127.0.0.1:5173,http://localhost:5173
 PROXY_POOL_URL=
 FREE_MONTHLY_QUOTA=5
 VIP_MONTHLY_QUOTA=100
 ```
 
-`.env` 不要提交。
+管理员邮箱和密码在 `backend/.env` 的 `ADMIN_EMAIL`、`ADMIN_PASSWORD` 里查看和修改。`.env` 不要提交。
 
 接口：
 
@@ -126,7 +124,11 @@ npm install
 
 后台入口只认 `backend/.env` 里的 `ADMIN_GATE`。留空时第一次启动会生成 32 位随机码并写回 `.env`。改掉这段并重启接口后，只认新地址；旧地址接口返回 404，页面会回到首页。
 
-用默认账号登录后打开 `http://127.0.0.1:5173/<那段路径>`。默认账号是 `admin@example.com` / `change-me-now`。公开部署前必须改掉邮箱、密码和 `SECRET_KEY`。管理员要先绑定验证器，后台编辑接口才会放行。
+初始化管理员由 `backend/.env` 决定，第一次启动时写入数据库：
+
+登录地址是 `http://127.0.0.1:5173/` 加上 `backend/.env` 里的 `ADMIN_GATE`。邮箱和密码看同一份文件里的 `ADMIN_EMAIL`、`ADMIN_PASSWORD`。
+
+公开部署前必须改掉 `backend/.env` 里的邮箱、密码、`ADMIN_GATE` 和 `SECRET_KEY`。验证器可以不绑。绑定之后，只有打开两步验证开关，登录才要填验证码。
 
 后台可以维护栏目、分类、链接、单页、广告、等级、积分规则和用户。链接列表能改收藏数和推荐数。报警页可以封禁账号和 IP。广告按位置分组，例如首页轮播、各栏目信息流、页脚、登录页、个人中心右侧。
 

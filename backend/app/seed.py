@@ -810,10 +810,10 @@ def seed(db: Session) -> str:
     db.add(
         Page(
             key="about",
-            title_en="About",
+            title_en="About NEXA",
             title_zh="关于我们",
-            body_en="A directory of links. Edit this page in the admin console.",
-            body_zh="这是一个链接导航站。请在管理后台编辑本页。",
+            body_en="NEXA is a bilingual directory for finding AI tools, cross-border tools, media sites, and public Telegram channels in one place.\n\nWhat you can find\nSections group AI chat, writing, image tools, cross-border selling, and media sites. Each entry is an outbound link. The side list jumps straight to a category.\n\nNews and rankings\nThe home page keeps the last 24 hours of Chinese and English stories in the same topics. Older items drop off on the next sync. GitHub growth and total-star boards sit beside the news and rank by count.\n\nPoints and levels\nSearch and browse without an account. Register to submit a link. Each approved link adds points, and points raise your level. Higher levels unlock benefits that keep being updated. A level, once reached, stays with the account.",
+            body_zh="NEXA 是中英双语导航站，把 AI 工具、跨境工具、媒体网站和公开的 Telegram 频道集中在一个页面里查找。\n\n能找到什么\n栏目按 AI 对话、写作、图像、跨境和媒体分组。每条都是可打开的外链，左侧分类可以直接跳到对应内容。\n\n资讯和排行\n综合资讯保留最近 24 小时的中文和英文来源，同一话题放在一起。过期条目会在下一次同步时清掉。旁边是 GitHub 增量和总星标两块排行，按数量从高到低。\n\n积分与升级\n不注册也可以搜索和浏览。注册后可以提交链接，通过审核的链接会计入积分，积分用来升级。升级后可以畅享对应福利，福利会长期更新。已经达到的等级永久有效。",
         )
     )
     db.add(

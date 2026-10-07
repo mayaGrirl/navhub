@@ -1,4 +1,5 @@
 import hashlib
+import random
 import secrets
 from datetime import datetime, timedelta
 
@@ -126,6 +127,30 @@ def take_captcha(token: str, progress: int) -> bool:
     except ValueError:
         return False
     return 0.45 <= elapsed <= 120 and progress >= 96
+
+
+def issue_match() -> tuple[str, int, str]:
+    token = secrets.token_urlsafe(18)
+    target = random.randint(28, 86)
+    shape = random.choice(["round", "circle", "diamond", "pill", "hex"])
+    rds.setex(f"match:{token}", 120, f"{time.time()}|{target}")
+    return token, target, shape
+
+
+def take_match(token: str, progress: int) -> bool:
+    if not token:
+        return False
+    key = f"match:{token}"
+    raw = rds.get(key)
+    if not raw:
+        return False
+    rds.delete(key)
+    try:
+        started, target = raw.split("|")
+        elapsed = time.time() - float(started)
+    except ValueError:
+        return False
+    return 0.35 <= elapsed <= 120 and abs(int(progress) - int(target)) <= 4
 
 
 def clear_failure(email: str) -> None:

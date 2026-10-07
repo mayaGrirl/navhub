@@ -31,16 +31,16 @@ def require_user(user: User | None = Depends(current_user)) -> User:
 
 def _admin_from_gate(
     db: Session,
-    nav_session: str | None,
+    nav_console: str | None,
     x_admin_gate: str | None,
 ) -> tuple[User, dict]:
     if not x_admin_gate or x_admin_gate != ensure_gate():
         raise HTTPException(status_code=404, detail="not found")
-    data = read_session(nav_session)
+    data = read_session(nav_console)
     if not data:
         raise HTTPException(status_code=401, detail="login required")
     user = db.get(User, data["user_id"])
-    if not user or user.role != "admin":
+    if not user or user.role != "admin" or user.banned:
         raise HTTPException(status_code=404, detail="not found")
     if user.totp_enabled and not data.get("totp_ok"):
         raise HTTPException(status_code=401, detail="totp required")
@@ -49,19 +49,17 @@ def _admin_from_gate(
 
 def require_admin_setup(
     db: Session = Depends(get_db),
-    nav_session: str | None = Cookie(default=None),
+    nav_console: str | None = Cookie(default=None),
     x_admin_gate: str | None = Header(default=None),
 ) -> User:
-    user, _data = _admin_from_gate(db, nav_session, x_admin_gate)
+    user, _data = _admin_from_gate(db, nav_console, x_admin_gate)
     return user
 
 
 def require_admin(
     db: Session = Depends(get_db),
-    nav_session: str | None = Cookie(default=None),
+    nav_console: str | None = Cookie(default=None),
     x_admin_gate: str | None = Header(default=None),
 ) -> User:
-    user, data = _admin_from_gate(db, nav_session, x_admin_gate)
-    if not user.totp_enabled or not data["totp_ok"]:
-        raise HTTPException(status_code=403, detail="totp required")
+    user, _data = _admin_from_gate(db, nav_console, x_admin_gate)
     return user

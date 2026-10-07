@@ -233,6 +233,11 @@ async function send() {
     notice.value = err.response?.data?.detail || t("authFailed");
   }
 }
+
+async function logout() {
+  await http.post("/auth/logout");
+  router.push("/");
+}
 </script>
 
 <template>
@@ -252,6 +257,7 @@ async function send() {
         <button type="button" :class="{ on: tab === 'submit' }" @click="tab = 'submit'">{{ t("submit") }}</button>
         <button type="button" :class="{ on: tab === 'proxy' }" @click="tab = 'proxy'">{{ t("proxyPool") }}</button>
         <a href="/">{{ locale === "zh" ? "返回主页" : "Back to home" }}</a>
+        <button type="button" @click="logout">{{ t("logout") }}</button>
       </nav>
     </aside>
     <section class="page form" v-if="tab === 'profile'">
