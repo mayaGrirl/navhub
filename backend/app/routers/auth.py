@@ -16,6 +16,7 @@ from app.security import (
     lock_until,
     mark_totp,
     new_session,
+    touch_session,
     new_totp_secret,
     plan_active,
     rate_limit,
@@ -56,7 +57,7 @@ def _cookie(response: Response, token: str) -> None:
 
 
 def _console_cookie(response: Response, token: str) -> None:
-    response.set_cookie("nav_console", token, httponly=True, samesite="lax", max_age=60 * 60 * 12, path="/")
+    response.set_cookie("nav_console", token, httponly=True, samesite="lax", max_age=60 * 60 * 24 * 7, path="/")
 
 
 @router.post("/captcha")
@@ -161,6 +162,7 @@ def console_login(body: Creds, request: Request, response: Response, db: Session
     db.commit()
     clear_failure(email)
     token = new_session(user.id, user.role, user.totp_enabled)
+    touch_session(token)
     _console_cookie(response, token)
     return {"id": user.id, "email": user.email, "totp_enabled": user.totp_enabled, "totp_ok": user.totp_enabled}
 

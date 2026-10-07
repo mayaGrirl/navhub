@@ -334,18 +334,25 @@ onMounted(async () => {
   try {
     await http.get("/manage/ping");
     me.value = (await http.get("/auth/console/me")).data;
-    ready.value = true;
-    await load();
   } catch (err) {
     if (err.response?.status === 404) {
       missing.value = true;
       router.replace("/");
-    }
-    else {
+    } else if (err.response?.status === 401) {
       needConsole.value = true;
       error.value = "";
       loadMatch();
+    } else {
+      ready.value = true;
+      error.value = err.response?.data?.detail || "load failed";
     }
+    return;
+  }
+  ready.value = true;
+  try {
+    await load();
+  } catch (err) {
+    error.value = err.response?.data?.detail || "load failed";
   }
 });
 

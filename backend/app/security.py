@@ -48,6 +48,11 @@ def read_session(token: str | None) -> dict | None:
     return {"user_id": int(user_id), "role": role, "totp_ok": totp_ok == "1"}
 
 
+def touch_session(token: str | None, seconds: int = 60 * 60 * 24 * 7) -> None:
+    if token and rds.get(f"session:{token}"):
+        rds.expire(f"session:{token}", seconds)
+
+
 def drop_session(token: str | None) -> None:
     if token:
         rds.delete(f"session:{token}")

@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 
 from app.db import get_db
 from app.models import User
-from app.security import read_session
+from app.security import read_session, touch_session
 from app.seed import ensure_gate
 
 
@@ -39,6 +39,7 @@ def _admin_from_gate(
     data = read_session(nav_console)
     if not data:
         raise HTTPException(status_code=401, detail="login required")
+    touch_session(nav_console)
     user = db.get(User, data["user_id"])
     if not user or user.role != "admin" or user.banned:
         raise HTTPException(status_code=404, detail="not found")
