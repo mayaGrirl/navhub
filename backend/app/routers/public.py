@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.deps import db_session, require_user
-from app.models import Ad, Announcement, Category, IpBan, Level, Link, LinkMark, NewsItem, Page, PointRule, Tab, User
+from app.models import Ad, Announcement, Category, Feedback, FeedbackNote, IpBan, Level, Link, LinkMark, NewsItem, Page, PointRule, Tab, User
 from app.urls import norm_url
 from app.security import client_ip, month_key, plan_active, quota_for, rate_limit, rds, checked_image
 
@@ -523,3 +523,82 @@ def my_submissions(page: int = 1, locale: str = "en", user: User = Depends(requi
             for link, category, tab in rows
         ],
     }
+
+
+def _feedback_payload(row: Feedback, notes: list[FeedbackNote]) -> dict:
+    return {
+        "id": row.id,
+        "title": row.title,
+        "body": row.body,
+        "image_url": row.image_url,
+        "status": row.status,
+        "created_at": row.created_at.isoformat() if row.created_at else "",
+        "updated_at": row.updated_at.isoformat() if row.updated_at else "",
+        "notes": [
+            {"id": note.id, "role": note.role, "body": note.body, "created_at": note.created_at.isoformat() if note.created_at else ""}
+            for note in notes
+        ],
+    }
+
+
+@router.get("/feedback")
+def my_feedback(user: User = Depends(require_user), db: Session = Depends(db_session)):
+    rows = db.scalars(select(Feedback).where(Feedback.user_id == user.id).order_by(Feedback.id.desc())).all()
+    return [
+        {"id": row.id, "title": row.title, "status": row.status, "created_at": row.created_at.isoformat() if row.created_at else "", "updated_at": row.updated_at.isoformat() if row.updated_at else ""}
+        for row in rows
+    ]
+
+
+@router.get("/feedback/{feedback_id}")
+def my_feedback_one(feedback_id: int, user: User = Depends(require_user), db: Session = Depends(db_session)):
+    row = db.get(Feedback, feedback_id)
+    if not row or row.user_id != user.id:
+        raise HTTPException(404, "not found")
+    notes = db.scalars(select(FeedbackNote).where(FeedbackNote.feedback_id == row.id).order_by(FeedbackNote.id)).all()
+    return _feedback_payload(row, notes)
+
+
+@router.post("/feedback")
+async def create_feedback(request: Request, user: User = Depends(require_user), db: Session = Depends(db_session)):
+    form = await request.form()
+    title = str(form.get("title") or "").strip()
+    body = str(form.get("body") or "").strip()
+    if not title or not body:
+        raise HTTPException(400, "填写标题和内容")
+    image_url = ""
+    upload = form.get("file")
+    if upload is not None and getattr(upload, "filename", ""):
+        raw = await upload.read()
+        if raw:
+            try:
+                suffix = checked_image(raw)
+            except ValueError:
+                raise HTTPException(400, "请上传 2MB 以内的 PNG、JPG、GIF 或 WEBP")
+            folder = Path(__file__).resolve().parents[3] / "frontend" / "public" / "uploads"
+            folder.mkdir(parents=True, exist_ok=True)
+            name = f"{uuid.uuid4().hex}{suffix}"
+            (folder / name).write_bytes(raw)
+            image_url = f"/uploads/{name}"
+    row = Feedback(user_id=user.id, title=title[:160], body=body, image_url=image_url, status="pending", updated_at=datetime.utcnow())
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return _feedback_payload(row, [])
+
+
+@router.post("/feedback/{feedback_id}/reply")
+def reply_feedback(feedback_id: int, payload: dict, user: User = Depends(require_user), db: Session = Depends(db_session)):
+    row = db.get(Feedback, feedback_id)
+    if not row or row.user_id != user.id:
+        raise HTTPException(404, "not found")
+    text = (payload.get("body") or "").strip()
+    if not text:
+        raise HTTPException(400, "填写回复")
+    db.add(FeedbackNote(feedback_id=row.id, role="user", body=text))
+    row.updated_at = datetime.utcnow()
+    if row.status in {"done", "rejected", "closed"}:
+        row.status = "pending"
+    db.commit()
+    notes = db.scalars(select(FeedbackNote).where(FeedbackNote.feedback_id == row.id).order_by(FeedbackNote.id)).all()
+    return _feedback_payload(row, notes)

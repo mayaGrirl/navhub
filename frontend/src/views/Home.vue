@@ -3,6 +3,7 @@ import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { useRoute } from "vue-router";
 import { useI18n } from "vue-i18n";
 import http from "../api";
+import FeedbackBox from "../components/FeedbackBox.vue";
 
 const route = useRoute();
 const { t, locale } = useI18n();
@@ -485,6 +486,7 @@ onUnmounted(() => {
       <div class="nav-links">
         <a :href="user ? '/submit?tab=proxy' : '/login?next=' + encodeURIComponent('/submit?tab=proxy')">{{ t("proxyPool") }}</a>
         <a v-if="user" href="/submit">{{ t("center") }}</a>
+        <FeedbackBox :logged-in="!!user" />
         <button class="text-btn" @click="setLocale(locale === 'en' ? 'zh' : 'en')">{{ locale === "en" ? "中文" : "EN" }}</button>
         <a v-if="!user" href="/login">{{ t("login") }}</a>
         <button v-else class="text-btn" @click="logout">{{ t("logout") }}</button>

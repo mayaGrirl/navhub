@@ -3,6 +3,7 @@ import { computed, onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { useI18n } from "vue-i18n";
 import http from "../api";
+import FeedbackBox from "../components/FeedbackBox.vue";
 
 const route = useRoute();
 const router = useRouter();
@@ -262,6 +263,7 @@ async function logout() {
         <button type="button" :class="{ on: tab === 'marks' }" @click="tab = 'marks'">{{ locale === "zh" ? "收藏推荐" : "Saved" }}</button>
         <button type="button" :class="{ on: tab === 'submit' }" @click="tab = 'submit'">{{ t("submit") }}</button>
         <button type="button" :class="{ on: tab === 'proxy' }" @click="tab = 'proxy'">{{ t("proxyPool") }}</button>
+        <button type="button" :class="{ on: tab === 'feedback' }" @click="tab = 'feedback'">{{ locale === "zh" ? "网站反馈" : "Feedback" }}</button>
         <a href="/">{{ locale === "zh" ? "返回主页" : "Back to home" }}</a>
         <button type="button" @click="logout">{{ t("logout") }}</button>
       </nav>
@@ -405,6 +407,9 @@ Authorization: Bearer 你的令牌</pre>
       <pre>curl -H "Authorization: Bearer {{ proxyToken || "你的令牌" }}" {{ origin }}/api/proxy/acquire
 curl -x http://1.2.3.4:8080 https://example.com</pre>
       <p>{{ locale === "zh" ? "把 proxy 字段原样用作 HTTP 代理。再次点击生成会换掉旧令牌。定时抓取不使用这个令牌，它直接访问代理池。" : "Use the proxy field as an HTTP proxy. Generating again replaces the old token. Scheduled crawls do not use this token; they call the pool directly." }}</p>
+    </section>
+    <section v-else-if="tab === 'feedback'" class="page feedback-page">
+      <FeedbackBox inline :logged-in="true" />
     </section>
     <aside class="account-ads">
       <section>

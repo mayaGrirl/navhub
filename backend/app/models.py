@@ -261,6 +261,26 @@ class MailSetting(Base):
     ses_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
     notify_default: Mapped[bool] = mapped_column(Boolean, default=False)
     money_dm: Mapped[bool] = mapped_column(Boolean, default=False)
+    gmail_host: Mapped[str] = mapped_column(String(120), default="")
+    gmail_port: Mapped[int] = mapped_column(Integer, default=0)
+    gmail_user: Mapped[str] = mapped_column(String(200), default="")
+    gmail_pass: Mapped[str] = mapped_column(String(200), default="")
+    gmail_from: Mapped[str] = mapped_column(String(200), default="")
+    gmail_from_name: Mapped[str] = mapped_column(String(80), default="")
+    netease_host: Mapped[str] = mapped_column(String(120), default="")
+    netease_port: Mapped[int] = mapped_column(Integer, default=0)
+    netease_user: Mapped[str] = mapped_column(String(200), default="")
+    netease_pass: Mapped[str] = mapped_column(String(200), default="")
+    netease_from: Mapped[str] = mapped_column(String(200), default="")
+    netease_from_name: Mapped[str] = mapped_column(String(80), default="")
+    sendgrid_key: Mapped[str] = mapped_column(String(300), default="")
+    sendgrid_from: Mapped[str] = mapped_column(String(200), default="")
+    sendgrid_from_name: Mapped[str] = mapped_column(String(80), default="")
+    mailgun_key: Mapped[str] = mapped_column(String(300), default="")
+    mailgun_domain: Mapped[str] = mapped_column(String(200), default="")
+    mailgun_region: Mapped[str] = mapped_column(String(20), default="")
+    mailgun_from: Mapped[str] = mapped_column(String(200), default="")
+    mailgun_from_name: Mapped[str] = mapped_column(String(80), default="")
 
 
 class MailTask(Base):
@@ -274,6 +294,29 @@ class MailTask(Base):
     interval_minutes: Mapped[int] = mapped_column(Integer, default=0)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     last_run_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class Feedback(Base):
+    __tablename__ = "feedbacks"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    title: Mapped[str] = mapped_column(String(160))
+    body: Mapped[str] = mapped_column(Text, default="")
+    image_url: Mapped[str] = mapped_column(String(500), default="")
+    status: Mapped[str] = mapped_column(String(20), default="pending")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class FeedbackNote(Base):
+    __tablename__ = "feedback_notes"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    feedback_id: Mapped[int] = mapped_column(ForeignKey("feedbacks.id"), index=True)
+    role: Mapped[str] = mapped_column(String(20), default="user")
+    body: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
 class MailLog(Base):

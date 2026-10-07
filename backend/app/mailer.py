@@ -29,19 +29,93 @@ def mail_row(db) -> MailSetting:
     return row
 
 
+def _text(stored: str, fallback: str) -> str:
+    value = (stored or "").strip()
+    return value or (fallback or "")
+
+
+def _port(stored: int, fallback: int) -> int:
+    return int(stored or 0) or int(fallback or 465)
+
+
+def gmail_account(row: MailSetting) -> dict:
+    return {
+        "host": _text(row.gmail_host, settings.mail_smtp_host),
+        "port": _port(row.gmail_port, settings.mail_smtp_port),
+        "user": _text(row.gmail_user, settings.mail_smtp_user),
+        "password": _text(row.gmail_pass, settings.mail_smtp_pass),
+        "sender": _text(row.gmail_from, settings.mail_from_address or settings.mail_from),
+        "name": _text(row.gmail_from_name, settings.mail_from_name),
+    }
+
+
+def netease_account(row: MailSetting) -> dict:
+    gmail = gmail_account(row)
+    return {
+        "host": _text(row.netease_host, settings.mail_smtp_163_host),
+        "port": _port(row.netease_port, settings.mail_smtp_163_port),
+        "user": _text(row.netease_user, settings.mail_smtp_163_user),
+        "password": _text(row.netease_pass, settings.mail_smtp_163_pass),
+        "sender": _text(row.netease_from, settings.mail_smtp_163_from or gmail["sender"]),
+        "name": _text(row.netease_from_name, settings.mail_smtp_163_from_name or gmail["name"]),
+    }
+
+
+def sendgrid_account(row: MailSetting) -> dict:
+    gmail = gmail_account(row)
+    return {
+        "key": _text(row.sendgrid_key, settings.sendgrid_api_key),
+        "sender": _text(row.sendgrid_from, gmail["sender"]),
+        "name": _text(row.sendgrid_from_name, gmail["name"]),
+    }
+
+
+def mailgun_account(row: MailSetting) -> dict:
+    gmail = gmail_account(row)
+    return {
+        "key": _text(row.mailgun_key, settings.mailgun_api_key),
+        "domain": _text(row.mailgun_domain, settings.mailgun_domain),
+        "region": _text(row.mailgun_region, settings.mailgun_region) or "us",
+        "sender": _text(row.mailgun_from, gmail["sender"]),
+        "name": _text(row.mailgun_from_name, gmail["name"]),
+    }
+
+
 def public_mail(row: MailSetting) -> dict:
+    gmail = gmail_account(row)
+    netease = netease_account(row)
+    sendgrid = sendgrid_account(row)
+    mailgun = mailgun_account(row)
     return {
         "provider": settings.mail_provider,
-        "from_name": settings.mail_from_name,
-        "from_address": settings.mail_from_address or settings.mail_from,
+        "from_name": gmail["name"],
+        "from_address": gmail["sender"],
         "gmail_enabled": row.gmail_enabled,
-        "gmail_ready": bool(settings.mail_smtp_user and settings.mail_smtp_pass),
+        "gmail_ready": bool(gmail["user"] and gmail["password"]),
+        "gmail_host": gmail["host"],
+        "gmail_port": gmail["port"],
+        "gmail_user": gmail["user"],
+        "gmail_pass": gmail["password"],
+        "gmail_from": gmail["sender"],
+        "gmail_from_name": gmail["name"],
         "netease_enabled": row.netease_enabled,
-        "netease_ready": bool(settings.mail_smtp_163_user and settings.mail_smtp_163_pass),
+        "netease_ready": bool(netease["user"] and netease["password"]),
+        "netease_host": netease["host"],
+        "netease_port": netease["port"],
+        "netease_user": netease["user"],
+        "netease_pass": netease["password"],
+        "netease_from": netease["sender"],
+        "netease_from_name": netease["name"],
         "sendgrid_enabled": row.sendgrid_enabled,
-        "sendgrid_ready": bool(settings.sendgrid_api_key),
+        "sendgrid_key": sendgrid["key"],
+        "sendgrid_from": sendgrid["sender"],
+        "sendgrid_from_name": sendgrid["name"],
         "mailgun_enabled": row.mailgun_enabled,
-        "mailgun_ready": bool(settings.mailgun_api_key and settings.mailgun_domain),
+        "mailgun_key": mailgun["key"],
+        "mailgun_domain": mailgun["domain"],
+        "mailgun_region": mailgun["region"],
+        "mailgun_from": mailgun["sender"],
+        "mailgun_from_name": mailgun["name"],
         "ses_enabled": row.ses_enabled,
         "ses_ready": bool(settings.aws_ses_key and settings.aws_ses_secret),
         "fallback": settings.mail_smtp_fallback,
@@ -69,39 +143,47 @@ def _smtp(host: str, port: int, user: str, password: str, sender: str, name: str
 
 def _channels(row: MailSetting) -> list[str]:
     order = []
-    if row.gmail_enabled and settings.mail_smtp_user and settings.mail_smtp_pass:
+    gmail = gmail_account(row)
+    netease = netease_account(row)
+    if row.gmail_enabled and gmail["user"] and gmail["password"]:
         order.append("gmail")
-    if row.netease_enabled and settings.mail_smtp_163_user and settings.mail_smtp_163_pass:
+    if row.netease_enabled and netease["user"] and netease["password"]:
         order.append("163")
-    if row.sendgrid_enabled and settings.sendgrid_api_key:
+    sendgrid = sendgrid_account(row)
+    mailgun = mailgun_account(row)
+    if row.sendgrid_enabled and sendgrid["key"]:
         order.append("sendgrid")
-    if row.mailgun_enabled and settings.mailgun_api_key and settings.mailgun_domain:
+    if row.mailgun_enabled and mailgun["key"] and mailgun["domain"]:
         order.append("mailgun")
     if row.ses_enabled and settings.aws_ses_key and settings.aws_ses_secret:
         order.append("ses")
     return order or ["log"]
 
 
-def _send_one(channel: str, recipient: str, subject: str, body: str) -> None:
-    sender = settings.mail_from_address or settings.mail_from
+def _send_one(row: MailSetting, channel: str, recipient: str, subject: str, body: str) -> None:
+    gmail = gmail_account(row)
+    netease = netease_account(row)
+    sender = gmail["sender"]
     if channel == "gmail":
-        _smtp(settings.mail_smtp_host, settings.mail_smtp_port, settings.mail_smtp_user, settings.mail_smtp_pass, sender, settings.mail_from_name, recipient, subject, body)
+        _smtp(gmail["host"], gmail["port"], gmail["user"], gmail["password"], gmail["sender"], gmail["name"], recipient, subject, body)
     elif channel == "163":
-        _smtp(settings.mail_smtp_163_host, settings.mail_smtp_163_port, settings.mail_smtp_163_user, settings.mail_smtp_163_pass, settings.mail_smtp_163_from or sender, settings.mail_smtp_163_from_name or settings.mail_from_name, recipient, subject, body)
+        _smtp(netease["host"], netease["port"], netease["user"], netease["password"], netease["sender"], netease["name"], recipient, subject, body)
     elif channel == "sendgrid":
+        sendgrid = sendgrid_account(row)
         response = httpx.post(
             "https://api.sendgrid.com/v3/mail/send",
-            headers={"Authorization": f"Bearer {settings.sendgrid_api_key}"},
-            json={"personalizations": [{"to": [{"email": recipient}]}], "from": {"email": sender, "name": settings.mail_from_name}, "subject": subject, "content": [{"type": "text/plain", "value": body}]},
+            headers={"Authorization": f"Bearer {sendgrid['key']}"},
+            json={"personalizations": [{"to": [{"email": recipient}]}], "from": {"email": sendgrid["sender"], "name": sendgrid["name"]}, "subject": subject, "content": [{"type": "text/plain", "value": body}]},
             timeout=settings.mail_smtp_timeout,
         )
         response.raise_for_status()
     elif channel == "mailgun":
-        host = "api.eu.mailgun.net" if settings.mailgun_region == "eu" else "api.mailgun.net"
+        mailgun = mailgun_account(row)
+        host = "api.eu.mailgun.net" if mailgun["region"] == "eu" else "api.mailgun.net"
         response = httpx.post(
-            f"https://{host}/v3/{settings.mailgun_domain}/messages",
-            auth=("api", settings.mailgun_api_key),
-            data={"from": f"{settings.mail_from_name} <{sender}>", "to": recipient, "subject": subject, "text": body},
+            f"https://{host}/v3/{mailgun['domain']}/messages",
+            auth=("api", mailgun["key"]),
+            data={"from": f"{mailgun['name']} <{mailgun['sender']}>", "to": recipient, "subject": subject, "text": body},
             timeout=settings.mail_smtp_timeout,
         )
         response.raise_for_status()
@@ -116,7 +198,7 @@ def deliver(db, recipient: str, subject: str, body: str) -> str:
     last = "已记录，未真正发出"
     for channel in _channels(row):
         try:
-            _send_one(channel, recipient, subject, body)
+            _send_one(row, channel, recipient, subject, body)
             _log(db, recipient, subject, channel, "sent" if channel != "log" else "logged", "" if channel != "log" else last)
             return channel
         except Exception as exc:

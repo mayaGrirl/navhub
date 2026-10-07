@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from app.crawl import fetch_meta, schedule_jobs, start_job, stop_job
 from app.deps import db_session, require_admin, require_admin_setup
 from app.security import client_ip, hash_password, checked_image
-from app.models import Ad, AdminAlert, Announcement, AuthLog, Category, CrawlItem, CrawlJob, CrawlLog, IpBan, Level, Link, MailLog, MailTask, NewsItem, Page, PointRule, Tab, User
+from app.models import Ad, AdminAlert, Announcement, AuthLog, Category, CrawlItem, CrawlJob, CrawlLog, Feedback, FeedbackNote, IpBan, Level, Link, MailLog, MailTask, NewsItem, Page, PointRule, Tab, User
 from app.urls import norm_url
 router = APIRouter(prefix="/api/manage", tags=["admin"], dependencies=[Depends(require_admin)])
 setup_router = APIRouter(prefix="/api/manage", tags=["admin"])
@@ -992,11 +992,31 @@ def mail_state(db: Session = Depends(db_session)):
 
 @router.put("/mail")
 def save_mail(payload: dict, db: Session = Depends(db_session)):
+    from app.config import settings
     from app.mailer import mail_row, public_mail
     row = mail_row(db)
     for key in ("gmail_enabled", "netease_enabled", "sendgrid_enabled", "mailgun_enabled", "ses_enabled", "notify_default", "money_dm"):
         if key in payload:
             setattr(row, key, bool(payload[key]))
+    for key in ("gmail_host", "gmail_user", "gmail_pass", "gmail_from", "gmail_from_name", "netease_host", "netease_user", "netease_pass", "netease_from", "netease_from_name", "sendgrid_key", "sendgrid_from", "sendgrid_from_name", "mailgun_key", "mailgun_domain", "mailgun_region", "mailgun_from", "mailgun_from_name"):
+        if key in payload:
+            setattr(row, key, str(payload.get(key) or "").strip()[:300])
+    if row.gmail_enabled and not (row.gmail_user.strip() or settings.mail_smtp_user) :
+        raise HTTPException(400, "开启 Gmail 需要填写账号和密码")
+    if row.gmail_enabled and not (row.gmail_pass.strip() or settings.mail_smtp_pass):
+        raise HTTPException(400, "开启 Gmail 需要填写账号和密码")
+    if row.netease_enabled and not ((row.netease_user.strip() or settings.mail_smtp_163_user) and (row.netease_pass.strip() or settings.mail_smtp_163_pass)):
+        raise HTTPException(400, "开启 163 需要填写账号和密码")
+    if row.sendgrid_enabled and not (row.sendgrid_key.strip() or settings.sendgrid_api_key):
+        raise HTTPException(400, "开启 SendGrid 需要填写 API Key")
+    if row.mailgun_enabled and not ((row.mailgun_key.strip() or settings.mailgun_api_key) and (row.mailgun_domain.strip() or settings.mailgun_domain)):
+        raise HTTPException(400, "开启 Mailgun 需要填写 API Key 和域名")
+    for key in ("gmail_port", "netease_port"):
+        if key in payload:
+            try:
+                setattr(row, key, int(payload.get(key) or 0))
+            except (TypeError, ValueError):
+                setattr(row, key, 0)
     db.commit()
     return public_mail(row)
 
@@ -1015,6 +1035,9 @@ def test_mail(payload: dict, db: Session = Depends(db_session)):
     if channel == "error":
         raise HTTPException(400, (last.message if last else "") or "发送失败")
     return {"ok": True, "channel": channel, "message": "已发送"}
+
+
+@router.post("/mail/send")
 def send_mail_now(payload: dict, db: Session = Depends(db_session)):
     from app.mailer import deliver, send_bulk
     subject = (payload.get("subject") or "").strip()
@@ -1050,3 +1073,50 @@ def delete_mail_task(task_id: int, db: Session = Depends(db_session)):
         db.delete(row)
         db.commit()
     return {"ok": True}
+
+
+def _feedback_detail(db: Session, row: Feedback) -> dict:
+    user = db.get(User, row.user_id)
+    notes = db.scalars(select(FeedbackNote).where(FeedbackNote.feedback_id == row.id).order_by(FeedbackNote.id)).all()
+    return {
+        "id": row.id,
+        "email": user.email if user else "",
+        "title": row.title,
+        "body": row.body,
+        "image_url": row.image_url,
+        "status": row.status,
+        "created_at": row.created_at.isoformat() if row.created_at else "",
+        "updated_at": row.updated_at.isoformat() if row.updated_at else "",
+        "notes": [
+            {"id": note.id, "role": note.role, "body": note.body, "created_at": note.created_at.isoformat() if note.created_at else ""}
+            for note in notes
+        ],
+    }
+
+
+@router.get("/feedback")
+def list_feedback(db: Session = Depends(db_session)):
+    rows = db.scalars(select(Feedback).order_by(Feedback.id.desc()).limit(200)).all()
+    return [_feedback_detail(db, row) for row in rows]
+
+
+@router.put("/feedback/{feedback_id}")
+def update_feedback(feedback_id: int, payload: dict, db: Session = Depends(db_session)):
+    row = db.get(Feedback, feedback_id)
+    if not row:
+        raise HTTPException(404, "not found")
+    labels = {"pending": "待处理", "working": "处理中", "done": "已完成", "rejected": "拒绝", "closed": "关闭"}
+    status = (payload.get("status") or row.status).strip()
+    if status not in labels:
+        raise HTTPException(400, "状态不正确")
+    note = (payload.get("note") or "").strip()
+    changed = status != row.status
+    row.status = status
+    row.updated_at = datetime.utcnow()
+    if changed or note:
+        text = f"状态更新为{labels[status]}" if changed else ""
+        if note:
+            text = f"{text}\n{note}".strip()
+        db.add(FeedbackNote(feedback_id=row.id, role="admin", body=text))
+    db.commit()
+    return _feedback_detail(db, row)

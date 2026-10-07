@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import { useI18n } from "vue-i18n";
 import http, { setGate } from "../api";
@@ -101,6 +101,7 @@ const sectionTitle = computed(() => ({
   levels: tx("等级", "Levels"),
   security: tx("账号安全", "Security"),
   mail: tx("邮件", "Mail"),
+  feedback: tx("反馈", "Feedback"),
 }[section.value] || ""));
 watch(section, () => {
   query.value = "";
@@ -275,7 +276,11 @@ const mailForm = ref({ subject: "", body: "", audience: "all", email: "", run_at
 const mailTest = ref("");
 const mailHint = ref("");
 const mailTab = ref("channels");
+const feedbackRows = ref([]);
+const feedbackCurrent = ref(null);
+const feedbackNote = ref("");
 const me = ref(null);
+const userOpen = ref(false);
 const totp = ref(null);
 const code = ref("");
 const linkForm = ref({ category_id: "", title_en: "", title_zh: "", url: "", description_en: "", description_zh: "", is_free: false, is_hot: false });
@@ -359,6 +364,8 @@ async function load(quiet = false) {
     tasks.push(http.get("/manage/proxies").then((res) => apply.push(() => { proxies.value = res.data; })).catch(() => apply.push(() => { proxies.value = { count: 0, sources: 0, items: [], note: "unavailable" }; })));
   } else if (name === "mail") {
     take("/manage/mail", (data) => { mailState.value = data; });
+  } else if (name === "feedback") {
+    take("/manage/feedback", (data) => { feedbackRows.value = data; if (feedbackCurrent.value) feedbackCurrent.value = data.find((row) => row.id === feedbackCurrent.value.id) || feedbackCurrent.value; });
   }
   if (name !== "alerts") take("/manage/alerts", (data) => { alerts.value = data; });
   try {
@@ -429,7 +436,12 @@ watch(section, (value) => {
   }, 3000);
 });
 
+function closeUserMenu() {
+  userOpen.value = false;
+}
+
 onMounted(async () => {
+  window.addEventListener("click", closeUserMenu);
   setGate(props.gate);
   try {
     await http.get("/manage/ping", { timeout: 8000 });
@@ -451,6 +463,8 @@ onMounted(async () => {
     }
   }
 });
+
+onBeforeUnmount(() => window.removeEventListener("click", closeUserMenu));
 
 async function loadMatch() {
   matched.value = false;
@@ -892,9 +906,24 @@ function totpText(row) {
   return row.totp_enabled ? tx("绑定已开启", "Bound, on") : tx("绑定未开启", "Bound, off");
 }
 async function saveMail() {
-  const { data } = await http.put("/manage/mail", mailState.value.settings);
-  mailState.value.settings = data;
-  notice.value = tx("已保存", "Saved");
+  const s = mailState.value.settings;
+  const missing = s.gmail_enabled && (!s.gmail_user || !s.gmail_pass) ? tx("开启 Gmail 需要填写账号和密码", "Gmail needs an account and password")
+    : s.netease_enabled && (!s.netease_user || !s.netease_pass) ? tx("开启 163 需要填写账号和密码", "163 needs an account and password")
+    : s.sendgrid_enabled && !s.sendgrid_key ? tx("开启 SendGrid 需要填写 API Key", "SendGrid needs an API key")
+    : s.mailgun_enabled && (!s.mailgun_key || !s.mailgun_domain) ? tx("开启 Mailgun 需要填写 API Key 和域名", "Mailgun needs an API key and domain")
+    : "";
+  if (missing) {
+    mailHint.value = missing;
+    return;
+  }
+  try {
+    const { data } = await http.put("/manage/mail", s);
+    mailState.value.settings = data;
+    notice.value = tx("已保存", "Saved");
+    mailHint.value = "";
+  } catch (err) {
+    mailHint.value = err.response?.data?.detail || tx("保存失败", "Save failed");
+  }
 }
 async function sendTest() {
   mailHint.value = tx("正在发送测试邮件…", "Sending the test…");
@@ -926,6 +955,20 @@ async function dropMailTask(id) {
 async function setProxy(user, payload) {
   await http.put(`/manage/users/${user.id}`, payload);
   await load();
+}
+async function saveFeedback() {
+  if (!feedbackCurrent.value) return;
+  const { data } = await http.put(`/manage/feedback/${feedbackCurrent.value.id}`, { status: feedbackCurrent.value.status, note: feedbackNote.value });
+  feedbackNote.value = "";
+  feedbackCurrent.value = data;
+  notice.value = tx("已保存", "Saved");
+  await load();
+}
+async function consoleLogout() {
+  userOpen.value = false;
+  await http.post("/auth/console/logout");
+  me.value = null;
+  needConsole.value = true;
 }
 </script>
 
@@ -981,12 +1024,21 @@ async function setProxy(user, payload) {
         <button class="text-btn" :class="{ on: section === 'users' }" @click="section = 'users'">{{ tx("用户", "Users") }}</button>
         <button class="text-btn" :class="{ on: section === 'proxies' }" @click="section = 'proxies'">{{ tx("代理", "Proxies") }}</button>
         <button class="text-btn" :class="{ on: section === 'levels' }" @click="section = 'levels'">{{ tx("等级", "Levels") }}</button>
-        <button class="text-btn" :class="{ on: section === 'security' }" @click="section = 'security'">{{ tx("账号安全", "Security") }}</button>
         <button class="text-btn" :class="{ on: section === 'mail' }" @click="section = 'mail'">{{ tx("邮件", "Mail") }}</button>
+        <button class="text-btn" :class="{ on: section === 'feedback' }" @click="section = 'feedback'">{{ tx("反馈", "Feedback") }}</button>
       </nav>
     </aside>
     <div class="console-main">
-    <header class="console-top"><strong>{{ sectionTitle }}</strong><em>{{ me.email }}</em></header>
+    <header class="console-top">
+      <strong>{{ sectionTitle }}</strong>
+      <div class="console-user" @click.stop>
+        <button type="button" class="user-mail" @click="userOpen = !userOpen">{{ me.email }}</button>
+        <div v-if="userOpen" class="user-menu">
+          <button type="button" @click="section = 'security'; userOpen = false">{{ tx("账号安全", "Security") }}</button>
+          <button type="button" @click="consoleLogout">{{ tx("登出", "Log out") }}</button>
+        </div>
+      </div>
+    </header>
     <div class="admin">
       <section v-if="section === 'overview'" class="form overview">
         <div v-if="listLoading" class="list-mask"><i></i><span>{{ tx("正在加载", "Loading") }}</span></div>
@@ -1053,7 +1105,7 @@ async function setProxy(user, payload) {
 
       <section v-else class="form list-page">
         <div v-if="listLoading" class="list-mask"><i></i><span>{{ tx("正在加载", "Loading") }}</span></div>
-        <div v-if="section !== 'security' && section !== 'mail'" class="list-bar">
+        <div v-if="section !== 'security' && section !== 'mail' && section !== 'feedback'" class="list-bar">
           <div class="filters">
           <template v-if="section === 'links' || section === 'categories' || section === 'crawl'">
             <select v-model="listTab" @change="listCat = ''">
@@ -1192,14 +1244,51 @@ async function setProxy(user, payload) {
             <button type="button" :class="{ on: mailTab === 'schedule' }" @click="mailTab = 'schedule'">{{ tx("定时", "Schedule") }}</button>
           </nav>
           <div v-if="mailTab === 'channels'" class="mail-board">
-          <article class="security-card">
-            <header><h3>{{ tx("发信通道", "Channels") }}</h3></header>
-            <p>{{ tx("先 Gmail，失败后再 163。账号写在服务器配置里。", "Gmail first, then 163. Accounts stay in the server config.") }}</p>
-            <label class="switch"><input type="checkbox" v-model="mailState.settings.gmail_enabled" @change="saveMail" /><i></i><span>Gmail · {{ mailState.settings.gmail_ready ? tx("已配置", "ready") : tx("未配置", "not set") }}</span></label>
-            <label class="switch"><input type="checkbox" v-model="mailState.settings.netease_enabled" @change="saveMail" /><i></i><span>163 · {{ mailState.settings.netease_ready ? tx("已配置", "ready") : tx("未配置", "not set") }}</span></label>
-            <label class="switch"><input type="checkbox" v-model="mailState.settings.sendgrid_enabled" @change="saveMail" /><i></i><span>SendGrid · {{ mailState.settings.sendgrid_ready ? tx("已配置", "ready") : tx("未配置", "not set") }}</span></label>
-            <label class="switch"><input type="checkbox" v-model="mailState.settings.mailgun_enabled" @change="saveMail" /><i></i><span>Mailgun · {{ mailState.settings.mailgun_ready ? tx("已配置", "ready") : tx("未配置", "not set") }}</span></label>
-            <label class="switch"><input type="checkbox" v-model="mailState.settings.notify_default" @change="saveMail" /><i></i><span>{{ tx("默认通知邮件", "Default notices") }}</span></label>
+          <article class="security-card mail-config">
+            <header><h3>{{ tx("发信通道", "Channels") }}</h3><button class="primary" type="button" @click="saveMail">{{ tx("保存", "Save") }}</button></header>
+            <p>{{ tx("打开开关后填写账号。留空的项会用服务器 .env 里已有的值。", "Turn a channel on to fill its account. A blank field keeps the value already in the server .env.") }}</p>
+            <section class="channel">
+              <header><strong>Gmail</strong><label class="switch"><input type="checkbox" v-model="mailState.settings.gmail_enabled" /><i></i></label></header>
+              <div v-if="mailState.settings.gmail_enabled" class="channel-fields">
+                <label class="field"><span>SMTP</span><input v-model="mailState.settings.gmail_host" placeholder="smtp.gmail.com" /></label>
+                <label class="field"><span>{{ tx("端口", "Port") }}</span><input v-model.number="mailState.settings.gmail_port" type="number" /></label>
+                <label class="field"><span>{{ tx("账号", "Account") }}</span><input v-model="mailState.settings.gmail_user" type="email" /></label>
+                <label class="field"><span>{{ tx("密码", "Password") }}</span><input v-model="mailState.settings.gmail_pass" /></label>
+                <label class="field"><span>{{ tx("发件邮箱", "From") }}</span><input v-model="mailState.settings.gmail_from" type="email" /></label>
+                <label class="field"><span>{{ tx("发件名称", "From name") }}</span><input v-model="mailState.settings.gmail_from_name" /></label>
+              </div>
+            </section>
+            <section class="channel">
+              <header><strong>163</strong><label class="switch"><input type="checkbox" v-model="mailState.settings.netease_enabled" /><i></i></label></header>
+              <div v-if="mailState.settings.netease_enabled" class="channel-fields">
+                <label class="field"><span>SMTP</span><input v-model="mailState.settings.netease_host" placeholder="smtp.163.com" /></label>
+                <label class="field"><span>{{ tx("端口", "Port") }}</span><input v-model.number="mailState.settings.netease_port" type="number" /></label>
+                <label class="field"><span>{{ tx("账号", "Account") }}</span><input v-model="mailState.settings.netease_user" type="email" /></label>
+                <label class="field"><span>{{ tx("密码", "Password") }}</span><input v-model="mailState.settings.netease_pass" /></label>
+                <label class="field"><span>{{ tx("发件邮箱", "From") }}</span><input v-model="mailState.settings.netease_from" type="email" /></label>
+                <label class="field"><span>{{ tx("发件名称", "From name") }}</span><input v-model="mailState.settings.netease_from_name" /></label>
+              </div>
+            </section>
+            <section class="channel">
+              <header><strong>SendGrid</strong><label class="switch"><input type="checkbox" v-model="mailState.settings.sendgrid_enabled" /><i></i></label></header>
+              <div v-if="mailState.settings.sendgrid_enabled" class="channel-fields">
+                <label class="field"><span>API Key</span><input v-model="mailState.settings.sendgrid_key" /></label>
+                <label class="field"><span>{{ tx("发件邮箱", "From") }}</span><input v-model="mailState.settings.sendgrid_from" type="email" /></label>
+                <label class="field"><span>{{ tx("发件名称", "From name") }}</span><input v-model="mailState.settings.sendgrid_from_name" /></label>
+              </div>
+            </section>
+            <section class="channel">
+              <header><strong>Mailgun</strong><label class="switch"><input type="checkbox" v-model="mailState.settings.mailgun_enabled" /><i></i></label></header>
+              <div v-if="mailState.settings.mailgun_enabled" class="channel-fields">
+                <label class="field"><span>API Key</span><input v-model="mailState.settings.mailgun_key" /></label>
+                <label class="field"><span>{{ tx("域名", "Domain") }}</span><input v-model="mailState.settings.mailgun_domain" placeholder="mg.example.com" /></label>
+                <label class="field"><span>{{ tx("区域", "Region") }}</span><select v-model="mailState.settings.mailgun_region"><option value="us">US</option><option value="eu">EU</option></select></label>
+                <label class="field"><span>{{ tx("发件邮箱", "From") }}</span><input v-model="mailState.settings.mailgun_from" type="email" /></label>
+                <label class="field"><span>{{ tx("发件名称", "From name") }}</span><input v-model="mailState.settings.mailgun_from_name" /></label>
+              </div>
+            </section>
+            <label class="switch"><input type="checkbox" v-model="mailState.settings.notify_default" /><i></i><span>{{ tx("默认通知邮件", "Default notices") }}</span></label>
+            <p v-if="mailHint">{{ mailHint }}</p>
           </article>
           <article class="security-card">
             <header><h3>{{ tx("测试配置", "Test") }}</h3></header>
@@ -1243,6 +1332,37 @@ async function setProxy(user, payload) {
             <button class="primary" type="button" @click="addMailTask">{{ tx("加入定时", "Schedule") }}</button>
             <p v-for="task in mailState.tasks" :key="task.id">{{ task.subject }} · {{ (task.run_at || "").replace("T", " ").slice(0, 16) }} <button type="button" @click="dropMailTask(task.id)">{{ tx("删除", "Delete") }}</button></p>
             <p v-if="!mailState.tasks.length">{{ tx("还没有定时任务", "No schedule yet") }}</p>
+          </article>
+        </div>
+
+        <div v-else-if="section === 'feedback'" class="mail-board">
+          <article class="security-card">
+            <header><h3>{{ tx("反馈工单", "Tickets") }}</h3></header>
+            <button v-for="row in feedbackRows" :key="row.id" type="button" class="ticket-row" @click="feedbackCurrent = row; feedbackNote = ''">
+              <span>{{ row.title }}</span>
+              <em>{{ row.email }} · {{ ({ pending: tx('待处理', 'Open'), working: tx('处理中', 'In progress'), done: tx('已完成', 'Done'), rejected: tx('拒绝', 'Rejected'), closed: tx('关闭', 'Closed') })[row.status] || row.status }}</em>
+            </button>
+            <p v-if="!feedbackRows.length">{{ tx("还没有反馈", "No tickets yet") }}</p>
+          </article>
+          <article v-if="feedbackCurrent" class="security-card">
+            <header><h3>{{ feedbackCurrent.title }}</h3></header>
+            <p>{{ feedbackCurrent.email }}</p>
+            <p>{{ feedbackCurrent.body }}</p>
+            <img v-if="feedbackCurrent.image_url" :src="feedbackCurrent.image_url" alt="" class="ticket-shot" />
+            <div v-for="note in feedbackCurrent.notes" :key="note.id" class="ticket-note" :class="note.role">
+              <b>{{ note.role === 'admin' ? tx('管理员', 'Admin') : tx('用户', 'User') }}</b>
+              <span>{{ (note.created_at || '').slice(0, 16).replace('T', ' ') }}</span>
+              <p>{{ note.body }}</p>
+            </div>
+            <select v-model="feedbackCurrent.status">
+              <option value="pending">{{ tx("待处理", "Open") }}</option>
+              <option value="working">{{ tx("处理中", "In progress") }}</option>
+              <option value="done">{{ tx("已完成", "Done") }}</option>
+              <option value="rejected">{{ tx("拒绝", "Rejected") }}</option>
+              <option value="closed">{{ tx("关闭", "Closed") }}</option>
+            </select>
+            <textarea v-model="feedbackNote" rows="3" :placeholder="tx('备注，用户能看到', 'Note the user will see')"></textarea>
+            <button class="primary" type="button" @click="saveFeedback">{{ tx("保存状态和备注", "Save status and note") }}</button>
           </article>
         </div>
 
