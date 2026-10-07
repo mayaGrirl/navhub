@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from app.crawl import fetch_meta, schedule_jobs, start_job, stop_job
 from app.deps import db_session, require_admin, require_admin_setup
-from app.security import client_ip, hash_password, checked_image
+from app.security import client_ip, hash_password, checked_image, rds
 from app.models import Ad, AdminAlert, Announcement, AuthLog, Category, CrawlItem, CrawlJob, CrawlLog, Feedback, FeedbackNote, IpBan, Level, Link, MailLog, MailTask, NewsItem, Page, PointRule, Tab, User
 from app.urls import norm_url
 router = APIRouter(prefix="/api/manage", tags=["admin"], dependencies=[Depends(require_admin)])
@@ -529,7 +529,16 @@ def create_announcement(payload: dict, db: Session = Depends(db_session)):
     )
     db.add(row)
     db.commit()
+    _drop_home_cache()
     return {"id": row.id}
+
+
+def _drop_home_cache():
+    for key in ("home:zh", "home:en"):
+        try:
+            rds.delete(key)
+        except Exception:
+            return
 
 
 @router.put("/announcements/{item_id}")
@@ -545,6 +554,7 @@ def update_announcement(item_id: int, payload: dict, db: Session = Depends(db_se
     if "popup" in payload:
         row.popup = bool(payload["popup"])
     db.commit()
+    _drop_home_cache()
     return {"ok": True}
 
 

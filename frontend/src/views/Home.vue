@@ -297,6 +297,11 @@ function setLocale(next) {
 
 const welcome = computed(() => locale.value === "zh" ? "欢迎来到 NEXA" : "Welcome to NEXA");
 const openNote = ref(null);
+function noteImage(note) {
+  const url = String(note?.image_url || "").trim();
+  if (!url || url.endsWith("ad-placeholder.svg")) return "";
+  return url;
+}
 const tickerNotes = computed(() => notes.value.length > 3 ? notes.value.concat(notes.value) : notes.value);
 
 function siteIcon(url) {
@@ -509,9 +514,9 @@ onUnmounted(() => {
         <button type="button" class="popup-x" aria-label="关闭" @click="openNote = null">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7l10 10M17 7 7 17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
         </button>
+        <img v-if="noteImage(openNote)" class="note-photo" :src="noteImage(openNote)" alt="" />
         <h2>{{ openNote.title }}</h2>
         <p class="meta" v-if="openNote.created_at">{{ openNote.created_at.slice(0, 16).replace("T", " ") }}</p>
-        <img v-if="openNote.image_url" :src="openNote.image_url" alt="" />
         <p>{{ openNote.body }}</p>
       </article>
     </div>
