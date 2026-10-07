@@ -56,7 +56,7 @@ onMounted(async () => {
     router.replace("/login");
     return;
   }
-  if (["proxy", "submit", "profile", "levels", "marks"].includes(route.query.tab)) tab.value = route.query.tab;
+  if (["proxy", "submit", "profile", "levels", "marks", "feedback"].includes(route.query.tab)) tab.value = route.query.tab;
   const [tokenRes, levelRes, rankRes, markRes] = await Promise.all([
     http.get("/proxy/token"),
     http.get("/me/level"),

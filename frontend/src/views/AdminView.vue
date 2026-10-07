@@ -956,6 +956,15 @@ async function setProxy(user, payload) {
   await http.put(`/manage/users/${user.id}`, payload);
   await load();
 }
+function toggleFeedback(row) {
+  if (feedbackCurrent.value?.id === row.id) {
+    feedbackCurrent.value = null;
+    feedbackNote.value = "";
+    return;
+  }
+  feedbackCurrent.value = row;
+  feedbackNote.value = "";
+}
 async function saveFeedback() {
   if (!feedbackCurrent.value) return;
   const { data } = await http.put(`/manage/feedback/${feedbackCurrent.value.id}`, { status: feedbackCurrent.value.status, note: feedbackNote.value });
@@ -1335,34 +1344,38 @@ async function consoleLogout() {
           </article>
         </div>
 
-        <div v-else-if="section === 'feedback'" class="mail-board">
+        <div v-else-if="section === 'feedback'" class="feedback-admin">
           <article class="security-card">
             <header><h3>{{ tx("反馈工单", "Tickets") }}</h3></header>
-            <button v-for="row in feedbackRows" :key="row.id" type="button" class="ticket-row" @click="feedbackCurrent = row; feedbackNote = ''">
-              <span>{{ row.title }}</span>
-              <em>{{ row.email }} · {{ ({ pending: tx('待处理', 'Open'), working: tx('处理中', 'In progress'), done: tx('已完成', 'Done'), rejected: tx('拒绝', 'Rejected'), closed: tx('关闭', 'Closed') })[row.status] || row.status }}</em>
-            </button>
             <p v-if="!feedbackRows.length">{{ tx("还没有反馈", "No tickets yet") }}</p>
-          </article>
-          <article v-if="feedbackCurrent" class="security-card">
-            <header><h3>{{ feedbackCurrent.title }}</h3></header>
-            <p>{{ feedbackCurrent.email }}</p>
-            <p>{{ feedbackCurrent.body }}</p>
-            <img v-if="feedbackCurrent.image_url" :src="feedbackCurrent.image_url" alt="" class="ticket-shot" />
-            <div v-for="note in feedbackCurrent.notes" :key="note.id" class="ticket-note" :class="note.role">
-              <b>{{ note.role === 'admin' ? tx('管理员', 'Admin') : tx('用户', 'User') }}</b>
-              <span>{{ (note.created_at || '').slice(0, 16).replace('T', ' ') }}</span>
-              <p>{{ note.body }}</p>
+            <div v-for="row in feedbackRows" :key="row.id" class="ticket-fold">
+              <button type="button" class="ticket-row" :class="{ on: feedbackCurrent && feedbackCurrent.id === row.id }" @click="toggleFeedback(row)">
+                <span>
+                  <b>{{ row.title }}</b>
+                  <small>{{ tx("提交", "Sent") }} {{ (row.created_at || "").slice(0, 16).replace("T", " ") }} · {{ tx("更新", "Updated") }} {{ (row.updated_at || row.created_at || "").slice(0, 16).replace("T", " ") }}</small>
+                </span>
+                <em :class="row.status">{{ row.email }} · {{ ({ pending: tx('待处理', 'Open'), working: tx('处理中', 'In progress'), done: tx('已完成', 'Done'), rejected: tx('拒绝', 'Rejected'), closed: tx('关闭', 'Closed') })[row.status] || row.status }}</em>
+              </button>
+              <div v-if="feedbackCurrent && feedbackCurrent.id === row.id" class="ticket-detail">
+                <p>{{ feedbackCurrent.email }}</p>
+                <p>{{ feedbackCurrent.body }}</p>
+                <img v-if="feedbackCurrent.image_url" :src="feedbackCurrent.image_url" alt="" class="ticket-shot" />
+                <div v-for="note in feedbackCurrent.notes" :key="note.id" class="ticket-note" :class="note.role">
+                  <b>{{ note.role === 'admin' ? tx('管理员', 'Admin') : tx('用户', 'User') }}</b>
+                  <span>{{ (note.created_at || '').slice(0, 16).replace('T', ' ') }}</span>
+                  <p>{{ note.body }}</p>
+                </div>
+                <select v-model="feedbackCurrent.status">
+                  <option value="pending">{{ tx("待处理", "Open") }}</option>
+                  <option value="working">{{ tx("处理中", "In progress") }}</option>
+                  <option value="done">{{ tx("已完成", "Done") }}</option>
+                  <option value="rejected">{{ tx("拒绝", "Rejected") }}</option>
+                  <option value="closed">{{ tx("关闭", "Closed") }}</option>
+                </select>
+                <textarea v-model="feedbackNote" rows="3" :placeholder="tx('备注，用户能看到', 'Note the user will see')"></textarea>
+                <button class="primary" type="button" @click="saveFeedback">{{ tx("保存状态和备注", "Save status and note") }}</button>
+              </div>
             </div>
-            <select v-model="feedbackCurrent.status">
-              <option value="pending">{{ tx("待处理", "Open") }}</option>
-              <option value="working">{{ tx("处理中", "In progress") }}</option>
-              <option value="done">{{ tx("已完成", "Done") }}</option>
-              <option value="rejected">{{ tx("拒绝", "Rejected") }}</option>
-              <option value="closed">{{ tx("关闭", "Closed") }}</option>
-            </select>
-            <textarea v-model="feedbackNote" rows="3" :placeholder="tx('备注，用户能看到', 'Note the user will see')"></textarea>
-            <button class="primary" type="button" @click="saveFeedback">{{ tx("保存状态和备注", "Save status and note") }}</button>
           </article>
         </div>
 

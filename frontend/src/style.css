@@ -369,9 +369,12 @@ button, input, textarea, select { font: inherit; }
 .user-menu button:hover { background: #f2f4f7; }
 .feedback-panel.pop { position: fixed; inset: 0; z-index: 40; display: grid; place-items: center; padding: 24px; background: rgba(15, 23, 42, .45); }
 .feedback-card { width: min(480px, 100%); max-height: min(760px, calc(100vh - 48px)); overflow: auto; padding: 22px 22px 18px; border-radius: 20px; background: #fff; box-shadow: 0 24px 60px rgba(15, 23, 42, .22); }
+.feedback-admin { max-width: 760px; }
+.ticket-fold { display: grid; gap: 8px; }
+.ticket-fold .ticket-detail { margin: 0 0 8px; padding: 12px; border: 1px solid #e8ecf1; border-radius: 12px; background: #f8fafc; }
 .feedback-records > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
 .feedback-records > header strong { font-size: 18px; }
-.feedback-records > header .primary { width: auto; }
+.feedback-records > header .primary { width: auto; margin-left: auto; }
 .feedback-panel:not(.pop) .feedback-card { width: 100%; max-height: none; padding: 8px 4px 0; box-shadow: none; }
 .account .feedback-page { background: #fff; border-radius: 16px; padding: 18px 18px 8px; }
 .feedback-card > header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
@@ -382,7 +385,7 @@ button, input, textarea, select { font: inherit; }
 .feedback-form label { display: grid; gap: 6px; color: #344054; font-size: 13px; }
 .feedback-form input, .feedback-form textarea, .ticket-detail textarea { width: 100%; border: 1px solid #d0d5dd; border-radius: 10px; padding: 10px 12px; background: #fff; color: #101828; }
 .feedback-form input:focus, .feedback-form textarea:focus, .ticket-detail textarea:focus { outline: none; border-color: #1f6b4a; }
-.feedback-form .primary, .ticket-detail .primary { width: 100%; }
+.feedback-form .mine-link { justify-self: center; color: #14643f; font-weight: 650; }
 .upload-tile { position: relative; display: grid; place-items: center; min-height: 112px; padding: 14px; border: 1px dashed #b7e0cb; border-radius: 12px; background: #f4fbf7; color: #14643f; text-align: center; cursor: pointer; overflow: hidden; }
 .upload-tile.filled { border-style: solid; background: #fff; }
 .upload-tile input { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
@@ -392,7 +395,9 @@ button, input, textarea, select { font: inherit; }
 .upload-tile button { position: absolute; right: 8px; bottom: 8px; z-index: 1; border: 0; border-radius: 999px; padding: 4px 10px; background: #111827; color: #fff; cursor: pointer; }
 .feedback-notice { margin: 0; color: #14643f; font-size: 13px; }
 .feedback-side h3, .ticket-detail h3 { margin: 0; font-size: 15px; }
-.ticket-row { display: flex; justify-content: space-between; gap: 10px; width: 100%; border: 1px solid transparent; border-radius: 10px; background: #f8fafc; text-align: left; padding: 10px 12px; cursor: pointer; }
+.ticket-row { display: flex; justify-content: space-between; align-items: center; gap: 10px; width: 100%; border: 1px solid transparent; border-radius: 10px; background: #f8fafc; text-align: left; padding: 10px 12px; cursor: pointer; }
+.ticket-row span { display: grid; gap: 4px; min-width: 0; }
+.ticket-row small { color: #98a2b3; font-size: 12px; }
 .ticket-row.on { border-color: #b7e0cb; background: #f4fbf7; }
 .ticket-row em { flex: none; font-style: normal; font-size: 12px; padding: 2px 8px; border-radius: 999px; background: #fff4e5; color: #b54708; }
 .ticket-row em.working { background: #eef4ff; color: #2f6fed; }

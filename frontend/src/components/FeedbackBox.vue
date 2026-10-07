@@ -24,6 +24,14 @@ const statusText = {
   closed: ["关闭", "Closed"],
 };
 
+function openMine() {
+  const next = "/submit?tab=feedback";
+  if (!props.loggedIn) {
+    window.location.href = `/login?next=${encodeURIComponent(next)}`;
+    return;
+  }
+  window.location.href = next;
+}
 function goLogin() {
   const next = window.location.pathname + window.location.search;
   window.location.href = `/login?next=${encodeURIComponent(next)}`;
@@ -112,7 +120,10 @@ onMounted(() => { if (props.inline && props.loggedIn) load(); });
       <button class="primary" type="button" @click="openBox">{{ zh() ? "提交反馈" : "New feedback" }}</button>
     </header>
     <button v-for="row in list" :key="row.id" type="button" class="ticket-row" :class="{ on: current && current.id === row.id }" @click="show(row.id)">
-      <span>{{ row.title }}</span>
+      <span>
+        <b>{{ row.title }}</b>
+        <small>{{ zh() ? "提交" : "Sent" }} {{ (row.created_at || "").slice(0, 16).replace("T", " ") }} · {{ zh() ? "更新" : "Updated" }} {{ (row.updated_at || row.created_at || "").slice(0, 16).replace("T", " ") }}</small>
+      </span>
       <em :class="row.status">{{ label(row.status) }}</em>
     </button>
     <p v-if="!list.length" class="meta">{{ zh() ? "还没有反馈" : "No tickets yet" }}</p>
@@ -148,6 +159,7 @@ onMounted(() => { if (props.inline && props.loggedIn) load(); });
           <button v-if="preview" type="button" @click.stop.prevent="clearFile">{{ zh() ? "移除" : "Remove" }}</button>
         </div>
         <button class="primary" type="submit">{{ zh() ? "提交反馈" : "Send feedback" }}</button>
+        <button v-if="!inline" class="text-btn mine-link" type="button" @click="openMine">{{ zh() ? "查看我的反馈" : "View my feedback" }}</button>
         <p v-if="notice" class="feedback-notice">{{ notice }}</p>
       </form>
     </div>
