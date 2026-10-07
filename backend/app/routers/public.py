@@ -157,7 +157,7 @@ def ads(slot: str = "", locale: str = "en", db: Session = Depends(db_session)):
 @router.get("/announcements")
 def announcements(locale: str = "en", db: Session = Depends(db_session)):
     rows = db.scalars(select(Announcement).where(Announcement.enabled.is_(True)).order_by(Announcement.id.desc())).all()
-    return [{"id": r.id, "title": _t(locale, r.title_en, r.title_zh), "body": _t(locale, r.body_en, r.body_zh)} for r in rows]
+    return [{"id": r.id, "title": _t(locale, r.title_en, r.title_zh), "body": _t(locale, r.body_en, r.body_zh), "image_url": r.image_url or "", "popup": bool(r.popup), "created_at": r.created_at.isoformat() if r.created_at else ""} for r in rows]
 
 
 @router.get("/news")

@@ -93,6 +93,18 @@ async def lifespan(_app: FastAPI):
             conn.execute(text("ALTER TABLE users ADD COLUMN totp_confirmed TINYINT(1) NOT NULL DEFAULT 0"))
         except Exception:
             pass
+        try:
+            conn.execute(text("ALTER TABLE announcements ADD COLUMN image_url VARCHAR(500) NOT NULL DEFAULT ''"))
+        except Exception:
+            pass
+        try:
+            conn.execute(text("ALTER TABLE announcements ADD COLUMN popup TINYINT(1) NOT NULL DEFAULT 0"))
+        except Exception:
+            pass
+        try:
+            conn.execute(text("ALTER TABLE announcements ADD COLUMN created_at DATETIME NULL"))
+        except Exception:
+            pass
         for statement in (
             "CREATE INDEX ix_news_pub ON news_items (published_at, category, id)",
             "CREATE INDEX ix_links_cat ON links (category_id, status, sort, id)",

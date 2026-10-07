@@ -22,6 +22,22 @@ const pageSize = ref(10);
 const jumpNo = ref(1);
 const picked = ref([]);
 const editor = ref(null);
+const editorTitle = computed(() => {
+  const names = {
+    link: ["编辑链接", "Edit link"],
+    tab: ["编辑栏目", "Edit tab"],
+    category: ["编辑分类", "Edit category"],
+    page: ["编辑页面", "Edit page"],
+    note: ["编辑公告", "Edit notice"],
+    ad: ["编辑广告", "Edit ad"],
+    crawl: ["新增采集", "Fetch a page"],
+    admin: ["新增管理员", "Add admin"],
+    ban: ["禁用 IP", "Block IP"],
+    password: ["重置密码", "Reset password"],
+  };
+  const pair = names[editor.value?.kind] || ["编辑", "Edit"];
+  return tx(pair[0], pair[1]);
+});
 const notice = ref("");
 const grain = ref("day");
 const trendFocus = ref("");
@@ -89,8 +105,16 @@ const tabView = computed(() => pageOf(tabs.value, ["title_zh", "title_en", "slug
 const catView = computed(() => pageOf(categories.value, ["title_zh", "title_en", "slug"]));
 const newsView = computed(() => pageOf(news.value, ["title", "source", "category"]));
 const pageView = computed(() => pageOf(pages.value, ["key", "title_zh", "title_en"]));
-const noteView = computed(() => pageOf(announcements.value, ["title_zh", "title_en", "body_zh"]));
-const adView = computed(() => pageOf(ads.value.map((row) => ({ ...row, where: slotWhere(row.slot) })), ["where", "title_zh", "title_en"]));
+const noteKind = ref("ticker");
+const noteView = computed(() => pageOf(announcements.value.filter((row) => (noteKind.value === "popup" ? row.popup : !row.popup)), ["title_zh", "title_en", "body_zh"]));
+const adView = computed(() => {
+  const order = slotGroups.flatMap((group) => group.items.map((item) => ({ ...item, page: group.page })));
+  const rows = order.map((item) => {
+    const row = ads.value.find((ad) => ad.slot === item.id) || { slot: item.id, title_zh: "", enabled: false, image_url: "" };
+    return { ...row, where: `${item.page} · ${item.where}` };
+  });
+  return pageOf(rows, ["where", "title_zh", "title_en"]);
+});
 const crawlView = computed(() => pageOf(items.value, ["title", "url"]));
 const userKind = ref("member");
 const memberView = computed(() => pageOf(users.value.filter((row) => row.role !== "admin"), ["email", "role", "last_ip", "plan"]));
@@ -117,10 +141,10 @@ function togglePage(rows, on) {
 const linkStats = ref({ total: 0, user: 0, system: 0 });
 const bars = computed(() => [
   { name: tx("链接", "Links"), n: linkStats.value.total, color: "#4c84f5" },
-  { name: tx("资讯", "News"), n: news.value.length, color: "#36cfc9" },
-  { name: tx("用户", "Users"), n: users.value.length, color: "#b7c3d0" },
-  { name: tx("广告", "Ads"), n: ads.value.length, color: "#8aa4d6" },
-  { name: tx("栏目", "Tabs"), n: tabs.value.length, color: "#d0d5dd" },
+  { name: tx("资讯", "News"), n: linkStats.value.news || 0, color: "#36cfc9" },
+  { name: tx("用户", "Users"), n: linkStats.value.users || 0, color: "#b7c3d0" },
+  { name: tx("广告", "Ads"), n: linkStats.value.ads || 0, color: "#8aa4d6" },
+  { name: tx("栏目", "Tabs"), n: linkStats.value.tabs || 0, color: "#d0d5dd" },
 ]);
 const barScale = computed(() => {
   const peak = Math.max(0, ...bars.value.map((item) => item.n));
@@ -190,10 +214,12 @@ const catForm = ref({ tab_id: "", slug: "", title_en: "", title_zh: "" });
 const crawlForm = ref({ url: "", category_id: "" });
 const adForm = ref({ slot: "banner", title_zh: "广告位", title_en: "Ad slot", image_url: "/ad-placeholder.svg", link_url: "/contact", enabled: true, sort: 0 });
 const slotGroups = [
-  { page: "首页顶部右侧", items: [{ id: "banner", where: "搜索框右边轮播" }] },
-  { page: "首页右侧 GitHub", items: [
+  { page: "首页顶部右侧", items: [{ id: "banner", where: "搜索框右边" }] },
+  { page: "首页栏目上方", items: [{ id: "strip", where: "通栏横图" }] },
+  { page: "首页右侧", items: [
     { id: "github-growth", where: "增量榜下面" },
     { id: "github-total", where: "总量榜下面" },
+    { id: "rail", where: "竖图广告" },
   ] },
   { page: "每日资讯内容区", items: [1, 2, 3, 4].map((n) => ({ id: `feed-general-${n}`, where: `第 ${n} 条，隔两个分类出现` })) },
   { page: "AI工具内容区", items: [1, 2, 3, 4].map((n) => ({ id: `feed-ai-${n}`, where: `第 ${n} 条，隔两个分类出现` })) },
@@ -488,7 +514,7 @@ function openNew(kind) {
     link: { ...linkForm.value, id: null },
     tab: { slug: "", title_en: "", title_zh: "", kind: "links", sort: 0, visible: true, adult: false },
     category: { tab_id: tabs.value[0]?.id || "", slug: "", title_en: "", title_zh: "", sort: 0, visible: true },
-    note: { title_en: "", title_zh: "", body_en: "", body_zh: "", enabled: true },
+    note: { title_en: "", title_zh: "", body_en: "", body_zh: "", image_url: "", popup: noteKind.value === "popup", enabled: true },
     ad: { ...adForm.value, id: null },
     crawl: { url: "", category_id: categories.value[0]?.id || "" },
     admin: { email: "", password: "" },
@@ -510,6 +536,22 @@ async function removeIds(path, ids) {
   for (const id of ids) await http.delete(`${path}/${id}`);
   picked.value = [];
   await load();
+}
+async function uploadNoteImage(event) {
+  const file = event.target.files?.[0];
+  if (!file) return;
+  const body = new FormData();
+  body.append("file", file);
+  const res = await http.post("/manage/uploads", body);
+  editor.value.row.image_url = res.data.url;
+}
+async function uploadAdImage(event) {
+  const file = event.target.files?.[0];
+  if (!file) return;
+  const body = new FormData();
+  body.append("file", file);
+  const res = await http.post("/manage/uploads", body);
+  editor.value.row.image_url = res.data.url;
 }
 async function saveEditor() {
   const { kind, row } = editor.value;
@@ -538,6 +580,9 @@ async function saveEditor() {
       await http.post("/manage/admins", row);
     } else if (kind === "ban") {
       await http.post("/manage/ip-bans", { ip: row.ip });
+    } else if (kind === "password") {
+      if ((row.password || "").length < 8) throw Object.assign(new Error("short"), { response: { data: { detail: "password too short" } } });
+      await http.put(`/manage/users/${row.id}/password`, { password: row.password });
     }
     editor.value = null;
     await load();
@@ -563,10 +608,16 @@ async function createAdmin() {
     error.value = err.response?.data?.detail || "failed";
   }
 }
-async function resetPassword(user) {
-  const password = window.prompt(tx("新密码至少 8 位", "New password, at least 8 characters"));
-  if (!password) return;
-  await http.put(`/manage/users/${user.id}/password`, { password });
+function resetPassword(user) {
+  error.value = "";
+  editor.value = { kind: "password", row: { id: user.id, email: user.email, password: "" } };
+}
+async function saveProxyLimit(row) {
+  const raw = String(row.proxy_limit ?? "").trim();
+  const value = raw === "" ? null : Math.max(0, Math.trunc(Number(raw)));
+  if (raw !== "" && Number.isNaN(Number(raw))) return;
+  row.proxy_limit = value;
+  await http.put(`/manage/users/${row.id}`, { proxy_limit: value });
 }
 async function resetTotp(user) {
   await http.post(`/manage/users/${user.id}/reset-totp`);
@@ -593,6 +644,10 @@ async function liftBan(ip) {
 async function setPlan(user, plan) {
   await http.put(`/manage/users/${user.id}`, { plan, days: 30 });
   await load();
+}
+function totpText(row) {
+  if (!row.totp_confirmed) return tx("未绑定", "Not bound");
+  return row.totp_enabled ? tx("绑定已开启", "Bound, on") : tx("绑定未开启", "Bound, off");
 }
 async function setProxy(user, payload) {
   await http.put(`/manage/users/${user.id}`, payload);
@@ -721,8 +776,11 @@ async function setProxy(user, payload) {
           <button v-if="section === 'structure'" type="button" @click="section = 'categories'">{{ tx("分类列表", "Categories") }}</button>
           <button v-if="section === 'categories'" class="primary" type="button" @click="openNew('category')">{{ tx("新增分类", "Add category") }}</button>
           <button v-if="section === 'categories'" type="button" @click="section = 'structure'">{{ tx("返回栏目", "Back to tabs") }}</button>
-          <button v-if="section === 'notes'" class="primary" type="button" @click="openNew('note')">{{ tx("新增", "Add") }}</button>
-          <button v-if="section === 'ads'" class="primary" type="button" @click="openNew('ad')">{{ tx("新增", "Add") }}</button>
+          <template v-if="section === 'notes'">
+            <button type="button" :class="{ primary: noteKind === 'ticker' }" @click="noteKind = 'ticker'; pageNo = 1">{{ tx("跑马灯", "Ticker") }}</button>
+            <button type="button" :class="{ primary: noteKind === 'popup' }" @click="noteKind = 'popup'; pageNo = 1">{{ tx("弹框", "Popup") }}</button>
+            <button class="primary" type="button" @click="openNew('note')">{{ tx("新增", "Add") }}</button>
+          </template>
           <button v-if="section === 'crawl'" class="primary" type="button" @click="openNew('crawl')">{{ tx("新增采集", "Fetch") }}</button>
           <template v-if="section === 'proxies'">
             <button type="button" :class="{ primary: proxyKind === 'alive' }" @click="proxyKind = 'alive'; pageNo = 1">{{ tx("有效代理", "Working") }} {{ proxies.count || 0 }}</button>
@@ -741,7 +799,6 @@ async function setProxy(user, payload) {
             <button type="button" :disabled="!picked.length" @click="removeIds('/manage/links', picked)">{{ tx("批量删除", "Delete selected") }}</button>
           </template>
           <button v-if="section === 'news'" type="button" :disabled="!picked.length" @click="removeIds('/manage/news', picked)">{{ tx("批量删除", "Delete selected") }}</button>
-          <button v-if="section === 'ads'" type="button" :disabled="!picked.length" @click="removeIds('/manage/ads', picked)">{{ tx("批量删除", "Delete selected") }}</button>
           <button v-if="section === 'notes'" type="button" :disabled="!picked.length" @click="removeIds('/manage/announcements', picked)">{{ tx("批量删除", "Delete selected") }}</button>
           <span v-if="notice">{{ notice }}</span>
         </div>
@@ -795,7 +852,7 @@ async function setProxy(user, payload) {
           <table>
             <thead>
               <tr>
-                <th><input type="checkbox" :checked="activeView.rows.length && activeView.rows.every((row) => picked.includes(row.id))" @change="togglePage(activeView.rows, $event.target.checked)" /></th>
+                <th v-if="section !== 'ads'"><input type="checkbox" :checked="activeView.rows.length && activeView.rows.every((row) => picked.includes(row.id))" @change="togglePage(activeView.rows, $event.target.checked)" /></th>
                 <template v-if="section === 'links'">
                   <th>{{ tx("名称", "Name") }}</th><th>{{ tx("地址", "URL") }}</th><th>{{ tx("来源", "Source") }}</th><th>{{ tx("收藏", "Saves") }}</th><th>{{ tx("推荐", "Picks") }}</th><th>{{ tx("点击", "Clicks") }}</th>
                 </template>
@@ -812,16 +869,16 @@ async function setProxy(user, payload) {
                   <th>key</th><th>{{ tx("标题", "Title") }}</th>
                 </template>
                 <template v-else-if="section === 'notes'">
-                  <th>{{ tx("标题", "Title") }}</th><th>{{ tx("状态", "Status") }}</th>
+                  <th>{{ tx("标题", "Title") }}</th><th>{{ tx("状态", "Status") }}</th><th>{{ tx("时间", "Time") }}</th>
                 </template>
                 <template v-else-if="section === 'ads'">
-                  <th>{{ tx("位置", "Slot") }}</th><th>{{ tx("名称", "Name") }}</th>
+                  <th>{{ tx("图片", "Image") }}</th><th>{{ tx("位置", "Slot") }}</th><th>{{ tx("名称", "Name") }}</th><th>{{ tx("状态", "Status") }}</th>
                 </template>
                 <template v-else-if="section === 'crawl'">
                   <th>{{ tx("标题", "Title") }}</th><th>{{ tx("地址", "URL") }}</th>
                 </template>
                 <template v-else-if="section === 'users' && userKind === 'admin'">
-                  <th>{{ tx("邮箱", "Email") }}</th><th>{{ tx("验证器", "Authenticator") }}</th><th>IP</th>
+                  <th>{{ tx("邮箱", "Email") }}</th><th>{{ tx("昵称", "Name") }}</th><th>{{ tx("验证器", "Authenticator") }}</th><th>IP</th><th>{{ tx("注册", "Joined") }}</th>
                 </template>
                 <template v-else-if="section === 'users'">
                   <th>{{ tx("邮箱", "Email") }}</th><th>{{ tx("昵称", "Name") }}</th><th>{{ tx("会员", "Plan") }}</th><th>{{ tx("等级", "Level") }}</th><th>{{ tx("代理", "Proxy") }}</th><th>IP</th><th>{{ tx("注册", "Joined") }}</th>
@@ -843,7 +900,7 @@ async function setProxy(user, payload) {
             </thead>
             <tbody>
               <tr v-for="row in activeView.rows" :key="row.id || row.url || row.level">
-                <td><input type="checkbox" :checked="picked.includes(row.id)" @change="togglePick(row.id, $event.target.checked)" /></td>
+                <td v-if="section !== 'ads'"><input type="checkbox" :checked="picked.includes(row.id)" @change="togglePick(row.id, $event.target.checked)" /></td>
                 <template v-if="section === 'links'">
                   <td>{{ row.title_zh || row.title_en }}</td><td class="clip">{{ row.url }}</td><td>{{ sourceLabel(row.source) }}</td><td>{{ row.favorite_count }}</td><td>{{ row.recommend_count }}</td><td>{{ row.click_count }}</td>
                   <td class="row-actions"><button type="button" @click="openEdit('link', row)">{{ tx("编辑", "Edit") }}</button><button type="button" @click="removeIds('/manage/links', [row.id])">{{ tx("删除", "Delete") }}</button></td>
@@ -865,19 +922,26 @@ async function setProxy(user, payload) {
                   <td class="row-actions"><button type="button" @click="openEdit('page', row)">{{ tx("编辑", "Edit") }}</button></td>
                 </template>
                 <template v-else-if="section === 'notes'">
-                  <td>{{ row.title_zh || row.title_en }}</td><td>{{ row.enabled ? tx("显示", "On") : tx("隐藏", "Off") }}</td>
+                  <td>{{ row.title_zh || row.title_en }}</td><td>{{ row.enabled ? tx("显示", "On") : tx("隐藏", "Off") }}</td><td>{{ (row.created_at || "").slice(0, 16).replace("T", " ") }}</td>
                   <td class="row-actions"><button type="button" @click="openEdit('note', row)">{{ tx("编辑", "Edit") }}</button><button type="button" @click="dropNote(row.id)">{{ tx("删除", "Delete") }}</button></td>
                 </template>
                 <template v-else-if="section === 'ads'">
-                  <td>{{ row.where }}</td><td>{{ row.title_zh || row.title_en }}</td>
-                  <td class="row-actions"><button type="button" @click="openEdit('ad', row)">{{ tx("编辑", "Edit") }}</button><button type="button" @click="removeAd(row.id)">{{ tx("删除", "Delete") }}</button></td>
+                  <td><img v-if="row.image_url" class="ad-thumb" :src="row.image_url" alt="" /></td>
+                  <td>{{ row.where }}</td>
+                  <td>{{ row.title_zh || row.title_en }}</td>
+                  <td>{{ row.enabled ? tx("显示", "On") : tx("关闭", "Off") }}</td>
+                  <td class="row-actions"><button type="button" @click="openEdit('ad', row)">{{ tx("编辑", "Edit") }}</button></td>
                 </template>
                 <template v-else-if="section === 'crawl'">
                   <td>{{ row.title }}</td><td class="clip">{{ row.url }}</td>
                   <td class="row-actions"><button type="button" @click="approve(row.id)">{{ tx("收录", "Approve") }}</button></td>
                 </template>
                 <template v-else-if="section === 'users' && userKind === 'admin'">
-                  <td>{{ row.email }}</td><td>{{ row.totp_enabled ? tx("已开启", "On") : tx("未开启", "Off") }}</td><td>{{ row.banned ? tx("已禁用", "Disabled") : row.last_ip }}</td>
+                  <td>{{ row.email }}</td>
+                  <td>{{ row.display_name || "—" }}</td>
+                  <td>{{ totpText(row) }}</td>
+                  <td>{{ row.last_ip || "—" }}</td>
+                  <td>{{ (row.created_at || "").slice(0, 10) }}</td>
                   <td class="row-actions">
                     <button type="button" @click="resetPassword(row)">{{ tx("重置密码", "Reset password") }}</button>
                     <button type="button" @click="resetTotp(row)">{{ tx("重置验证器", "Reset authenticator") }}</button>
@@ -892,8 +956,7 @@ async function setProxy(user, payload) {
                   <td>
                     <div class="proxy-edit">
                       <button type="button" :class="{ primary: row.proxy_unlimited }" @click="setProxy(row, { proxy_unlimited: !row.proxy_unlimited })">{{ row.proxy_unlimited ? tx("取消白名单", "Limited") : tx("设白名单", "Unlimited") }}</button>
-                      <input v-model="row.proxy_limit" type="number" min="0" :placeholder="tx('次数', 'Limit')" />
-                      <button type="button" @click="setProxy(row, { proxy_limit: row.proxy_limit === '' || row.proxy_limit == null ? null : Number(row.proxy_limit) })">{{ tx("保存", "Save") }}</button>
+                      <input class="limit-box" v-model="row.proxy_limit" type="number" min="0" step="1" inputmode="numeric" :placeholder="tx('次数', 'Limit')" @blur="saveProxyLimit(row)" @keyup.enter="$event.target.blur()" />
                     </div>
                   </td>
                   <td>{{ row.banned ? tx("已禁用", "Disabled") : (row.last_ip || "—") }}</td>
@@ -945,81 +1008,86 @@ async function setProxy(user, payload) {
       </section>
 
       <div v-if="editor" class="console-modal" @click.self="editor = null">
-        <form class="form" @submit.prevent="saveEditor">
-          <h3>{{ tx("编辑", "Edit") }}</h3>
-          <template v-if="editor.kind === 'link'">
-            <select v-model="editor.row.category_id"><option v-for="cat in categories" :key="cat.id" :value="cat.id">{{ cat.title_zh || cat.title_en }}</option></select>
-            <input v-model="editor.row.title_zh" :placeholder="tx('中文名称', 'Chinese name')" />
-            <input v-model="editor.row.title_en" :placeholder="tx('英文名称', 'English name')" />
-            <input v-model="editor.row.url" placeholder="https://" required />
-            <input v-model="editor.row.description_zh" :placeholder="tx('中文简介', 'Chinese description')" />
-            <input v-model="editor.row.description_en" :placeholder="tx('英文简介', 'English description')" />
-            <label><input type="checkbox" v-model="editor.row.is_free" /> {{ tx("免费", "Free") }}</label>
-            <label><input type="checkbox" v-model="editor.row.is_hot" /> {{ tx("热门", "Hot") }}</label>
-          </template>
-          <template v-else-if="editor.kind === 'tab'">
-            <input v-model="editor.row.slug" placeholder="slug" required />
-            <input v-model="editor.row.title_zh" :placeholder="tx('中文名', 'Chinese name')" />
-            <input v-model="editor.row.title_en" :placeholder="tx('英文名', 'English name')" />
-            <select v-model="editor.row.kind">
-              <option value="links">links</option>
-              <option value="home">home</option>
-            </select>
-            <input v-model.number="editor.row.sort" type="number" :placeholder="tx('排序，数字越大越靠前', 'Sort, larger numbers come first')" />
-            <label><input type="checkbox" v-model="editor.row.visible" /> {{ tx("显示", "Visible") }}</label>
-            <label><input type="checkbox" v-model="editor.row.adult" /> 18+</label>
-          </template>
-          <template v-else-if="editor.kind === 'category'">
-            <select v-model="editor.row.tab_id"><option v-for="tab in tabs" :key="tab.id" :value="tab.id">{{ tab.title_zh || tab.title_en }}</option></select>
-            <input v-model="editor.row.slug" placeholder="slug" required />
-            <input v-model="editor.row.title_zh" :placeholder="tx('中文名', 'Chinese name')" />
-            <input v-model="editor.row.title_en" :placeholder="tx('英文名', 'English name')" />
-            <input v-model.number="editor.row.sort" type="number" :placeholder="tx('排序，数字越大越靠前', 'Sort, larger numbers come first')" />
-            <label><input type="checkbox" v-model="editor.row.visible" /> {{ tx("显示", "Visible") }}</label>
-          </template>
-          <template v-else-if="editor.kind === 'page'">
-            <input v-model="editor.row.title_zh" />
-            <input v-model="editor.row.title_en" />
-            <textarea v-model="editor.row.body_zh" rows="4"></textarea>
-            <textarea v-model="editor.row.body_en" rows="4"></textarea>
-            <input v-model="editor.row.email" placeholder="Email" />
-            <input v-model="editor.row.phone" placeholder="Phone" />
-            <input v-model="editor.row.im" placeholder="Telegram" />
-          </template>
-          <template v-else-if="editor.kind === 'note'">
-            <input v-model="editor.row.title_zh" :placeholder="tx('中文标题', 'Chinese title')" />
-            <input v-model="editor.row.title_en" :placeholder="tx('英文标题', 'English title')" />
-            <textarea v-model="editor.row.body_zh" rows="3"></textarea>
-            <textarea v-model="editor.row.body_en" rows="3"></textarea>
-            <label><input type="checkbox" v-model="editor.row.enabled" /> {{ tx("显示", "Visible") }}</label>
-          </template>
-          <template v-else-if="editor.kind === 'ad'">
-            <select v-model="editor.row.slot">
-              <optgroup v-for="group in slotGroups" :key="group.page" :label="group.page">
-                <option v-for="item in group.items" :key="item.id" :value="item.id">{{ item.where }}</option>
-              </optgroup>
-            </select>
-            <input v-model="editor.row.title_zh" :placeholder="tx('中文名称', 'Chinese name')" />
-            <input v-model="editor.row.title_en" :placeholder="tx('英文名称', 'English name')" />
-            <input v-model="editor.row.image_url" :placeholder="tx('图片地址', 'Image URL')" />
-            <input v-model="editor.row.link_url" :placeholder="tx('跳转地址', 'Link')" />
-          </template>
-          <template v-else-if="editor.kind === 'crawl'">
-            <input v-model="editor.row.url" placeholder="https://" required />
-            <select v-model="editor.row.category_id"><option v-for="cat in categories" :key="cat.id" :value="cat.id">{{ cat.title_zh || cat.title_en }}</option></select>
-          </template>
-          <template v-else-if="editor.kind === 'admin'">
-            <input v-model="editor.row.email" type="email" :placeholder="tx('邮箱', 'Email')" required />
-            <input v-model="editor.row.password" type="password" :placeholder="tx('密码至少 8 位', 'Password, at least 8 characters')" required />
-          </template>
-          <template v-else-if="editor.kind === 'ban'">
-            <input v-model="editor.row.ip" placeholder="IP" required />
-          </template>
-          <p v-if="error">{{ error }}</p>
-          <div class="row-actions">
-            <button class="primary" type="submit">{{ tx("保存", "Save") }}</button>
-            <button type="button" @click="editor = null">{{ tx("取消", "Cancel") }}</button>
+        <form class="dialog" @submit.prevent="saveEditor">
+          <header>
+            <h3>{{ editorTitle }}</h3>
+            <button class="dialog-x" type="button" @click="editor = null" aria-label="close">×</button>
+          </header>
+          <div class="dialog-body">
+            <template v-if="editor.kind === 'link'">
+              <label class="field"><span>{{ tx("分类", "Category") }}</span><select v-model="editor.row.category_id"><option v-for="cat in categories" :key="cat.id" :value="cat.id">{{ cat.title_zh || cat.title_en }}</option></select></label>
+              <label class="field"><span>{{ tx("地址", "URL") }}</span><input v-model="editor.row.url" placeholder="https://" required /></label>
+              <label class="field"><span>{{ tx("中文名称", "Chinese name") }}</span><input v-model="editor.row.title_zh" /></label>
+              <label class="field"><span>{{ tx("英文名称", "English name") }}</span><input v-model="editor.row.title_en" /></label>
+              <label class="field wide"><span>{{ tx("中文简介", "Chinese description") }}</span><input v-model="editor.row.description_zh" /></label>
+              <label class="field wide"><span>{{ tx("英文简介", "English description") }}</span><input v-model="editor.row.description_en" /></label>
+              <label class="field choice"><span>{{ tx("免费", "Free") }}</span><input type="checkbox" v-model="editor.row.is_free" /></label>
+              <label class="field choice"><span>{{ tx("热门", "Hot") }}</span><input type="checkbox" v-model="editor.row.is_hot" /></label>
+            </template>
+            <template v-else-if="editor.kind === 'tab'">
+              <label class="field"><span>slug</span><input v-model="editor.row.slug" required /></label>
+              <label class="field"><span>{{ tx("类型", "Kind") }}</span><select v-model="editor.row.kind"><option value="links">links</option><option value="home">home</option></select></label>
+              <label class="field"><span>{{ tx("中文名", "Chinese name") }}</span><input v-model="editor.row.title_zh" /></label>
+              <label class="field"><span>{{ tx("英文名", "English name") }}</span><input v-model="editor.row.title_en" /></label>
+              <label class="field"><span>{{ tx("排序", "Sort") }}</span><input v-model.number="editor.row.sort" type="number" /></label>
+              <label class="field choice"><span>{{ tx("显示", "Visible") }}</span><input type="checkbox" v-model="editor.row.visible" /></label>
+              <label class="field choice"><span>18+</span><input type="checkbox" v-model="editor.row.adult" /></label>
+            </template>
+            <template v-else-if="editor.kind === 'category'">
+              <label class="field"><span>{{ tx("栏目", "Tab") }}</span><select v-model="editor.row.tab_id"><option v-for="tab in tabs" :key="tab.id" :value="tab.id">{{ tab.title_zh || tab.title_en }}</option></select></label>
+              <label class="field"><span>slug</span><input v-model="editor.row.slug" required /></label>
+              <label class="field"><span>{{ tx("中文名", "Chinese name") }}</span><input v-model="editor.row.title_zh" /></label>
+              <label class="field"><span>{{ tx("英文名", "English name") }}</span><input v-model="editor.row.title_en" /></label>
+              <label class="field"><span>{{ tx("排序", "Sort") }}</span><input v-model.number="editor.row.sort" type="number" /></label>
+              <label class="field choice"><span>{{ tx("显示", "Visible") }}</span><input type="checkbox" v-model="editor.row.visible" /></label>
+            </template>
+            <template v-else-if="editor.kind === 'page'">
+              <label class="field"><span>{{ tx("中文标题", "Chinese title") }}</span><input v-model="editor.row.title_zh" /></label>
+              <label class="field"><span>{{ tx("英文标题", "English title") }}</span><input v-model="editor.row.title_en" /></label>
+              <label class="field wide"><span>{{ tx("中文正文", "Chinese body") }}</span><textarea v-model="editor.row.body_zh" rows="5"></textarea></label>
+              <label class="field wide"><span>{{ tx("英文正文", "English body") }}</span><textarea v-model="editor.row.body_en" rows="5"></textarea></label>
+              <label class="field"><span>Email</span><input v-model="editor.row.email" /></label>
+              <label class="field"><span>{{ tx("电话", "Phone") }}</span><input v-model="editor.row.phone" /></label>
+              <label class="field"><span>Telegram</span><input v-model="editor.row.im" /></label>
+            </template>
+            <template v-else-if="editor.kind === 'note'">
+              <label class="field"><span>{{ tx("中文标题", "Chinese title") }}</span><input v-model="editor.row.title_zh" /></label>
+              <label class="field"><span>{{ tx("英文标题", "English title") }}</span><input v-model="editor.row.title_en" /></label>
+              <label class="field wide"><span>{{ tx("中文正文", "Chinese body") }}</span><textarea v-model="editor.row.body_zh" rows="4"></textarea></label>
+              <label class="field wide"><span>{{ tx("英文正文", "English body") }}</span><textarea v-model="editor.row.body_en" rows="4"></textarea></label>
+              <label class="field wide"><span>{{ tx("图片", "Image") }}</span><input type="file" accept="image/*" @change="uploadNoteImage" /></label>
+              <img v-if="editor.row.image_url" class="ad-preview" :src="editor.row.image_url" alt="" />
+              <label class="field choice"><span>{{ tx("显示", "Visible") }}</span><input type="checkbox" v-model="editor.row.enabled" /></label>
+            </template>
+            <template v-else-if="editor.kind === 'ad'">
+              <label class="field wide"><span>{{ tx("位置", "Slot") }}</span><input :value="slotWhere(editor.row.slot)" readonly /></label>
+              <label class="field"><span>{{ tx("中文名称", "Chinese name") }}</span><input v-model="editor.row.title_zh" /></label>
+              <label class="field"><span>{{ tx("英文名称", "English name") }}</span><input v-model="editor.row.title_en" /></label>
+              <label class="field wide"><span>{{ tx("图片", "Image") }}</span><input type="file" accept="image/*" @change="uploadAdImage" /></label>
+              <img v-if="editor.row.image_url" class="ad-preview" :src="editor.row.image_url" alt="" />
+              <label class="field"><span>{{ tx("跳转地址", "Link") }}</span><input v-model="editor.row.link_url" /></label>
+              <label class="field choice"><span>{{ tx("显示", "Visible") }}</span><input type="checkbox" v-model="editor.row.enabled" /></label>
+            </template>
+            <template v-else-if="editor.kind === 'crawl'">
+              <label class="field"><span>{{ tx("地址", "URL") }}</span><input v-model="editor.row.url" placeholder="https://" required /></label>
+              <label class="field"><span>{{ tx("分类", "Category") }}</span><select v-model="editor.row.category_id"><option v-for="cat in categories" :key="cat.id" :value="cat.id">{{ cat.title_zh || cat.title_en }}</option></select></label>
+            </template>
+            <template v-else-if="editor.kind === 'admin'">
+              <label class="field"><span>{{ tx("邮箱", "Email") }}</span><input v-model="editor.row.email" type="email" required /></label>
+              <label class="field"><span>{{ tx("密码", "Password") }}</span><input v-model="editor.row.password" type="password" minlength="8" required /></label>
+            </template>
+            <template v-else-if="editor.kind === 'ban'">
+              <label class="field"><span>IP</span><input v-model="editor.row.ip" required /></label>
+            </template>
+            <template v-else-if="editor.kind === 'password'">
+              <label class="field wide"><span>{{ editor.row.email }}</span><input v-model="editor.row.password" type="password" minlength="8" :placeholder="tx('新密码至少 8 位', 'New password, at least 8 characters')" required /></label>
+            </template>
           </div>
+          <footer>
+            <p v-if="error">{{ error === "password too short" ? tx("新密码至少 8 位", "New password, at least 8 characters") : error }}</p>
+            <button type="button" @click="editor = null">{{ tx("取消", "Cancel") }}</button>
+            <button class="primary" type="submit">{{ tx("确定", "OK") }}</button>
+          </footer>
         </form>
       </div>
     </div>

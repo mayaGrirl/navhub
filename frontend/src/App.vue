@@ -16,6 +16,16 @@
       <button v-else class="text-btn" type="button" @click="logout">{{ t("logout") }}</button>
     </div>
   </div>
+  <div v-if="popup" class="day-popup" @click.self="closePopup">
+    <article>
+      <button type="button" class="dialog-x" @click="closePopup">×</button>
+      <a :href="popup.href || undefined">
+        <img v-if="popup.image" :src="popup.image" alt="" />
+        <h2>{{ popup.title }}</h2>
+        <p>{{ popup.body }}</p>
+      </a>
+    </article>
+  </div>
   <button class="to-top" type="button" aria-label="Back to top" @click="scrollTop">
     <svg viewBox="0 0 24 24" aria-hidden="true">
       <path d="M6 14.5 12 8.5l6 6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
@@ -34,7 +44,9 @@ const route = useRoute();
 const router = useRouter();
 const menuOpen = ref(false);
 const user = ref(null);
+const popup = ref(null);
 const isHome = computed(() => route.path === "/");
+const publicPage = computed(() => ["/", "/about", "/contact", "/advertise", "/login", "/register", "/submit"].includes(route.path));
 
 watch(() => route.path, () => {
   menuOpen.value = false;
@@ -61,11 +73,32 @@ async function logout() {
   menuOpen.value = false;
 }
 
+function closePopup() {
+  popup.value = null;
+  localStorage.setItem("nexa-popup-day", new Date().toISOString().slice(0, 10));
+}
+
+async function loadPopup() {
+  if (!publicPage.value) return;
+  const today = new Date().toISOString().slice(0, 10);
+  if (localStorage.getItem("nexa-popup-day") === today) return;
+  try {
+    const { data } = await http.get("/announcements", { params: { locale: locale.value } });
+    const note = (data || []).find((item) => item.popup);
+    if (!note) return;
+    popup.value = { title: note.title, body: note.body, image: note.image_url, href: "" };
+  } catch {
+    popup.value = null;
+  }
+}
+
 onMounted(async () => {
   try {
     user.value = (await http.get("/auth/me")).data;
   } catch {
     user.value = null;
   }
+  loadPopup();
 });
+watch(() => route.path, loadPopup);
 </script>

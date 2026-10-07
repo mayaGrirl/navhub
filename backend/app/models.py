@@ -203,7 +203,10 @@ class Announcement(Base):
     title_zh: Mapped[str] = mapped_column(String(160))
     body_en: Mapped[str] = mapped_column(Text, default="")
     body_zh: Mapped[str] = mapped_column(Text, default="")
+    image_url: Mapped[str] = mapped_column(String(500), default="")
+    popup: Mapped[bool] = mapped_column(Boolean, default=False)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
 class CrawlJob(Base):

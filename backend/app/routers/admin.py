@@ -1,8 +1,11 @@
 from datetime import datetime, timedelta
 
 import httpx
-from fastapi import APIRouter, Cookie, Depends, HTTPException
-from sqlalchemy import select
+import uuid
+from pathlib import Path
+
+from fastapi import APIRouter, Cookie, Depends, File, HTTPException, Request, UploadFile
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.crawl import fetch_meta
@@ -212,7 +215,15 @@ def _link(row: Link) -> dict:
 def link_stats(db: Session = Depends(db_session)):
     rows = db.execute(select(Link.source, Link.id)).all()
     user = sum(1 for source, _id in rows if source == "user")
-    return {"total": len(rows), "user": user, "system": len(rows) - user}
+    return {
+        "total": len(rows),
+        "user": user,
+        "system": len(rows) - user,
+        "news": db.scalar(select(func.count()).select_from(NewsItem)) or 0,
+        "users": db.scalar(select(func.count()).select_from(User)) or 0,
+        "ads": db.scalar(select(func.count()).select_from(Ad)) or 0,
+        "tabs": db.scalar(select(func.count()).select_from(Tab)) or 0,
+    }
 
 
 @router.get("/links")
@@ -334,8 +345,49 @@ def update_page(page_id: int, payload: dict, db: Session = Depends(db_session)):
     return {"ok": True}
 
 
+AD_SLOTS = [
+    ("banner", "首页顶部右侧", "搜索框右边", 10),
+    ("strip", "首页栏目上方", "通栏横图", 20),
+    ("github-growth", "首页右侧", "增量榜下面", 30),
+    ("github-total", "首页右侧", "总量榜下面", 40),
+    ("rail", "首页右侧", "竖图广告", 50),
+    ("footer", "页面底部", "页脚右侧", 60),
+    ("about-1", "关于我们", "右侧第 1 个", 70),
+    ("about-2", "关于我们", "右侧第 2 个", 80),
+    ("about-3", "关于我们", "右侧第 3 个", 90),
+    ("contact-1", "联系方式", "右侧第 1 个", 100),
+    ("contact-2", "联系方式", "右侧第 2 个", 110),
+    ("contact-3", "联系方式", "右侧第 3 个", 120),
+    ("auth-1", "登录 / 注册", "左侧第 1 张", 130),
+    ("auth-2", "登录 / 注册", "左侧第 2 张", 140),
+    ("auth-3", "登录 / 注册", "左侧第 3 张", 150),
+    ("account-1", "个人中心", "右侧第 1 个", 160),
+    ("account-2", "个人中心", "右侧第 2 个", 170),
+] + [
+    (f"feed-{slug}-{n}", page, f"内容区第 {n} 条", 200 + i * 10 + n)
+    for i, (slug, page) in enumerate([
+        ("general", "每日资讯"),
+        ("ai", "AI工具"),
+        ("cross-border", "跨境电商"),
+        ("media", "午夜媒体"),
+        ("telegram", "TG群"),
+    ])
+    for n in (1, 2, 3, 4)
+]
+
+
+def ensure_ads(db: Session):
+    have = set(db.scalars(select(Ad.slot)).all())
+    for slot, page, where, sort in AD_SLOTS:
+        if slot in have:
+            continue
+        db.add(Ad(slot=slot, title_zh=f"{page} · {where}", title_en=slot, image_url="", link_url="", enabled=False, sort=sort))
+    db.commit()
+
+
 @router.get("/ads")
 def list_ads(db: Session = Depends(db_session)):
+    ensure_ads(db)
     rows = db.scalars(select(Ad).order_by(Ad.sort, Ad.id)).all()
     return [
         {
@@ -373,7 +425,7 @@ def update_ad(ad_id: int, payload: dict, db: Session = Depends(db_session)):
     row = db.get(Ad, ad_id)
     if not row:
         raise HTTPException(404, "not found")
-    for key in ("slot", "image_url", "link_url", "title_en", "title_zh"):
+    for key in ("image_url", "link_url", "title_en", "title_zh"):
         if key in payload:
             setattr(row, key, payload[key] or "")
     if "enabled" in payload:
@@ -386,11 +438,24 @@ def update_ad(ad_id: int, payload: dict, db: Session = Depends(db_session)):
 
 @router.delete("/ads/{ad_id}")
 def delete_ad(ad_id: int, db: Session = Depends(db_session)):
-    row = db.get(Ad, ad_id)
-    if row:
-        db.delete(row)
-        db.commit()
-    return {"ok": True}
+    raise HTTPException(400, "ad slots are fixed")
+
+
+@router.post("/uploads")
+async def upload_ad_image(file: UploadFile = File(...)):
+    if not (file.content_type or "").startswith("image/"):
+        raise HTTPException(status_code=400, detail="image required")
+    raw = await file.read()
+    if not raw or len(raw) > 2 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="image required")
+    suffix = Path(file.filename or "").suffix.lower()
+    if suffix not in {".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"}:
+        suffix = ".png"
+    folder = Path(__file__).resolve().parents[3] / "frontend" / "public" / "uploads"
+    folder.mkdir(parents=True, exist_ok=True)
+    name = f"{uuid.uuid4().hex}{suffix}"
+    (folder / name).write_bytes(raw)
+    return {"url": f"/uploads/{name}"}
 
 
 @router.get("/news")
@@ -422,7 +487,7 @@ def delete_news(item_id: int, db: Session = Depends(db_session)):
 def list_announcements(db: Session = Depends(db_session)):
     rows = db.scalars(select(Announcement).order_by(Announcement.id.desc())).all()
     return [
-        {"id": r.id, "title_en": r.title_en, "title_zh": r.title_zh, "body_en": r.body_en, "body_zh": r.body_zh, "enabled": r.enabled}
+        {"id": r.id, "title_en": r.title_en, "title_zh": r.title_zh, "body_en": r.body_en, "body_zh": r.body_zh, "image_url": r.image_url or "", "popup": bool(r.popup), "enabled": r.enabled, "created_at": r.created_at.isoformat() if r.created_at else ""}
         for r in rows
     ]
 
@@ -434,6 +499,8 @@ def create_announcement(payload: dict, db: Session = Depends(db_session)):
         title_zh=payload.get("title_zh") or "",
         body_en=payload.get("body_en") or "",
         body_zh=payload.get("body_zh") or "",
+        image_url=payload.get("image_url") or "",
+        popup=bool(payload.get("popup")),
         enabled=bool(payload.get("enabled", True)),
     )
     db.add(row)
@@ -446,11 +513,13 @@ def update_announcement(item_id: int, payload: dict, db: Session = Depends(db_se
     row = db.get(Announcement, item_id)
     if not row:
         raise HTTPException(404, "not found")
-    for key in ("title_en", "title_zh", "body_en", "body_zh"):
+    for key in ("title_en", "title_zh", "body_en", "body_zh", "image_url"):
         if key in payload:
             setattr(row, key, payload[key] or "")
     if "enabled" in payload:
         row.enabled = bool(payload["enabled"])
+    if "popup" in payload:
+        row.popup = bool(payload["popup"])
     db.commit()
     return {"ok": True}
 
@@ -465,7 +534,12 @@ def delete_announcement(item_id: int, db: Session = Depends(db_session)):
 
 
 @router.get("/users")
-def users(db: Session = Depends(db_session)):
+def users(request: Request, db: Session = Depends(db_session), actor: User = Depends(require_admin)):
+    forwarded = request.headers.get("x-forwarded-for", "")
+    ip = forwarded.split(",")[0].strip()[:64] if forwarded else (request.client.host if request.client else "")[:64]
+    if ip and actor.last_ip != ip:
+        actor.last_ip = ip
+        db.commit()
     rows = db.scalars(select(User).order_by(User.id.desc()).limit(1000)).all()
     levels = db.scalars(select(Level).where(Level.level <= 10).order_by(Level.min_points.desc(), Level.level.desc())).all()
     return [
@@ -480,6 +554,7 @@ def users(db: Session = Depends(db_session)):
             "created_at": r.created_at.isoformat() if r.created_at else "",
             "plan_expires_at": r.plan_expires_at.isoformat() if r.plan_expires_at else None,
             "totp_enabled": r.totp_enabled,
+            "totp_confirmed": bool(r.totp_confirmed),
             "banned": bool(r.banned),
             "last_ip": r.last_ip or "",
             "proxy_unlimited": bool(r.proxy_unlimited),
@@ -556,6 +631,7 @@ def reset_totp(user_id: int, db: Session = Depends(db_session)):
         raise HTTPException(404, "not found")
     row.totp_secret = ""
     row.totp_enabled = False
+    row.totp_confirmed = False
     db.commit()
     return {"ok": True}
 

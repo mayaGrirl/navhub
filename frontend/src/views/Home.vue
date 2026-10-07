@@ -92,8 +92,10 @@ const hotWords = {
   en: ["AI tools", "cross-border", "ChatGPT", "GitHub", "Telegram", "short video", "top news"],
 };
 const bannerAds = computed(() => ads.value.filter((item) => item.slot === "banner"));
+const stripAds = computed(() => ads.value.filter((item) => item.slot === "strip"));
 const growthAds = computed(() => ads.value.filter((item) => item.slot === "github-growth"));
 const totalAds = computed(() => ads.value.filter((item) => item.slot === "github-total"));
+const railAds = computed(() => ads.value.filter((item) => item.slot === "rail"));
 const footerAds = computed(() => ads.value.filter((item) => item.slot === "footer"));
 const feedAds = computed(() => {
   const slug = currentTab.value?.slug;
@@ -276,10 +278,9 @@ function setLocale(next) {
   localStorage.setItem("locale", next);
 }
 
-const welcome = computed(() => {
-  if (notes.value[0]) return `${notes.value[0].title} ${notes.value[0].body}`.trim();
-  return locale.value === "zh" ? "欢迎来到 NEXA，工具、资讯和排行都在这里。" : "Welcome to NEXA — tools, news, and rankings.";
-});
+const welcome = computed(() => locale.value === "zh" ? "欢迎来到 NEXA" : "Welcome to NEXA");
+const openNote = ref(null);
+const tickerNotes = computed(() => notes.value.length > 1 ? notes.value.concat(notes.value) : notes.value);
 
 function siteIcon(url) {
   try {
@@ -398,7 +399,7 @@ function applyHome(data) {
   if (!tabs.value.find((item) => item.id === tabId.value)) {
     tabId.value = tabs.value.find((item) => item.kind === "home")?.id || tabs.value[0]?.id || null;
   }
-  notes.value = data.announcements || [];
+  notes.value = (data.announcements || []).filter((item) => !item.popup);
   news.value = data.news || [];
   ads.value = data.ads || [];
   siteBoards.value = data.ranks || { favorites: [], recommends: [], clicks: [] };
@@ -484,10 +485,24 @@ onUnmounted(() => {
         <button v-else class="text-btn" @click="logout">{{ t("logout") }}</button>
       </div>
     </header>
+    <div v-if="openNote" class="day-popup" @click.self="openNote = null">
+      <article>
+        <button type="button" class="dialog-x" @click="openNote = null">×</button>
+        <h2>{{ openNote.title }}</h2>
+        <p class="meta" v-if="openNote.created_at">{{ openNote.created_at.slice(0, 16).replace("T", " ") }}</p>
+        <img v-if="openNote.image_url" :src="openNote.image_url" alt="" />
+        <p>{{ openNote.body }}</p>
+      </article>
+    </div>
     <section class="mast">
       <a class="mast-brand" href="/">
         <span class="mast-name"><img class="mast-mark" src="/logo.svg" alt="" /><strong>NEXA</strong></span>
         <span>{{ welcome }}</span>
+        <div v-if="notes.length" class="ticker" :class="{ run: notes.length > 1 }">
+          <div class="ticker-track">
+            <button v-for="(note, index) in tickerNotes" :key="note.id + '-' + index" type="button" @click="openNote = note">{{ note.title }}</button>
+          </div>
+        </div>
       </a>
       <div class="finder">
         <div class="engines">
@@ -530,6 +545,11 @@ onUnmounted(() => {
         </div>
       </aside>
     </section>
+
+    <a v-if="stripAds.length" class="strip-ad" :href="stripAds[0].link_url || undefined" target="_blank" rel="noopener">
+      <img v-if="stripAds[0].image_url" :src="stripAds[0].image_url" :alt="stripAds[0].title" />
+      <span v-else>{{ stripAds[0].title }}</span>
+    </a>
 
     <div class="portal">
       <aside class="panel side-jump">
@@ -682,6 +702,12 @@ onUnmounted(() => {
             </a>
           </div>
           <p v-if="!siteBoards.recommends.length" class="meta">{{ locale === "zh" ? "还没有推荐" : "No recommendations yet" }}</p>
+        </section>
+        <section v-if="railAds.length" class="rail-ads">
+          <a v-for="ad in railAds" :key="ad.id" :href="ad.link_url || undefined" target="_blank" rel="noopener">
+            <img v-if="ad.image_url" :src="ad.image_url" :alt="ad.title" />
+            <span v-if="ad.title">{{ ad.title }}</span>
+          </a>
         </section>
         <section>
           <h2><svg class="board-icon" viewBox="0 0 24 24"><path d="M6 3.2v13.2l3.6-2.6 2.1 4.8 2-0.9-2.1-4.8H18L6 3.2z"/></svg>{{ locale === "zh" ? "点击榜" : "Clicks" }}</h2>
