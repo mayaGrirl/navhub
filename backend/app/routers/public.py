@@ -150,8 +150,25 @@ def ads(slot: str = "", locale: str = "en", db: Session = Depends(db_session)):
     stmt = select(Ad).where(Ad.enabled.is_(True)).order_by(Ad.sort, Ad.id)
     if slot:
         stmt = stmt.where(Ad.slot == slot)
+    from app.routers.admin import AD_SLOTS
+    marks = {slot: index + 1 for index, (slot, *_) in enumerate(AD_SLOTS)}
     rows = db.scalars(stmt).all()
-    return [{"id": r.id, "slot": r.slot, "image_url": r.image_url, "link_url": r.link_url, "title": _t(locale, r.title_en, r.title_zh)} for r in rows]
+    result = []
+    for r in rows:
+        image = (r.image_url or "").strip()
+        if image in {"", "/ad-placeholder.svg"}:
+            image = ""
+        if not image and not r.show_placeholder:
+            continue
+        result.append({
+            "id": r.id,
+            "slot": r.slot,
+            "image_url": image or "/ad-placeholder.svg",
+            "link_url": r.link_url,
+            "title": _t(locale, r.title_en, r.title_zh),
+            "no": marks.get(r.slot, 0),
+        })
+    return result
 
 
 @router.get("/announcements")

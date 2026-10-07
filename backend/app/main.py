@@ -12,6 +12,7 @@ from app.config import settings
 from app.db import Base, SessionLocal, engine
 from app.routers import admin, auth, public
 from app.github_ranks import schedule_daily
+from app.crawl import schedule_jobs
 from fetch_news import schedule_news
 from fill_daily import schedule_directory
 from app.seed import seed
@@ -105,6 +106,28 @@ async def lifespan(_app: FastAPI):
             conn.execute(text("ALTER TABLE announcements ADD COLUMN created_at DATETIME NULL"))
         except Exception:
             pass
+        try:
+            conn.execute(text("ALTER TABLE ads ADD COLUMN show_placeholder TINYINT(1) NOT NULL DEFAULT 1"))
+        except Exception:
+            pass
+        try:
+            conn.execute(text("ALTER TABLE ads ADD COLUMN updated_at DATETIME NULL"))
+        except Exception:
+            pass
+        for column in (
+            "ALTER TABLE crawl_jobs ADD COLUMN status VARCHAR(20) NOT NULL DEFAULT 'idle'",
+            "ALTER TABLE crawl_jobs ADD COLUMN message VARCHAR(500) NOT NULL DEFAULT ''",
+            "ALTER TABLE crawl_jobs ADD COLUMN found_count INT NOT NULL DEFAULT 0",
+            "CREATE TABLE IF NOT EXISTS crawl_logs (id INT PRIMARY KEY AUTO_INCREMENT, job_id INT NOT NULL, message VARCHAR(500) NOT NULL DEFAULT '', created_at DATETIME NULL, INDEX ix_crawl_logs_job (job_id))",
+        ):
+            try:
+                conn.execute(text(column))
+            except Exception:
+                pass
+        try:
+            conn.execute(text("UPDATE crawl_jobs SET status = 'stopped' WHERE status = 'running'"))
+        except Exception:
+            pass
         for statement in (
             "CREATE INDEX ix_news_pub ON news_items (published_at, category, id)",
             "CREATE INDEX ix_links_cat ON links (category_id, status, sort, id)",
@@ -128,6 +151,7 @@ async def lifespan(_app: FastAPI):
         db.close()
     schedule_daily()
     schedule_news()
+    schedule_jobs()
     schedule_directory()
     from app.review import sweep_open
 

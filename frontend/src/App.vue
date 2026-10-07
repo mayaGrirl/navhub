@@ -18,7 +18,9 @@
   </div>
   <div v-if="popup" class="day-popup" @click.self="closePopup">
     <article>
-      <button type="button" class="dialog-x" @click="closePopup">×</button>
+      <button type="button" class="popup-x" aria-label="关闭" @click="closePopup">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7l10 10M17 7 7 17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+      </button>
       <a :href="popup.href || undefined">
         <img v-if="popup.image" :src="popup.image" alt="" />
         <h2>{{ popup.title }}</h2>

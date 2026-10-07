@@ -105,6 +105,9 @@ const feedAds = computed(() => {
     .sort((a, b) => a.slot.localeCompare(b.slot));
 });
 
+function placeholder(ad) {
+  return !!ad && (!ad.image_url || String(ad.image_url).endsWith("ad-placeholder.svg"));
+}
 function feedAdAt(index) {
   if ((index + 1) % 2 !== 0) return null;
   return feedAds.value[(index + 1) / 2 - 1] || null;
@@ -487,7 +490,9 @@ onUnmounted(() => {
     </header>
     <div v-if="openNote" class="day-popup" @click.self="openNote = null">
       <article>
-        <button type="button" class="dialog-x" @click="openNote = null">×</button>
+        <button type="button" class="popup-x" aria-label="关闭" @click="openNote = null">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7l10 10M17 7 7 17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+        </button>
         <h2>{{ openNote.title }}</h2>
         <p class="meta" v-if="openNote.created_at">{{ openNote.created_at.slice(0, 16).replace("T", " ") }}</p>
         <img v-if="openNote.image_url" :src="openNote.image_url" alt="" />
@@ -537,6 +542,7 @@ onUnmounted(() => {
             rel="noopener"
           >
             <img v-if="ad.image_url" :src="ad.image_url" :alt="ad.title" loading="lazy" decoding="async" />
+            <b v-if="placeholder(ad)" class="ad-no">{{ ad.no }}</b>
             <span>{{ ad.title }}</span>
           </a>
           <div v-if="bannerAds.length > 1" class="dots">
@@ -548,6 +554,7 @@ onUnmounted(() => {
 
     <a v-if="stripAds.length" class="strip-ad" :href="stripAds[0].link_url || undefined" target="_blank" rel="noopener">
       <img v-if="stripAds[0].image_url" :src="stripAds[0].image_url" :alt="stripAds[0].title" />
+      <b v-if="placeholder(stripAds[0])" class="ad-no">{{ stripAds[0].no }}</b>
       <span v-else>{{ stripAds[0].title }}</span>
     </a>
 
@@ -598,6 +605,7 @@ onUnmounted(() => {
           </section>
           <a v-if="feedAdAt(index)" class="feed-ad" :href="feedAdAt(index).link_url || undefined" target="_blank" rel="noopener">
             <img v-if="feedAdAt(index).image_url" :src="feedAdAt(index).image_url" :alt="feedAdAt(index).title" loading="lazy" decoding="async" />
+            <b v-if="placeholder(feedAdAt(index))" class="ad-no">{{ feedAdAt(index).no }}</b>
             <span>{{ feedAdAt(index).title }}</span>
           </a>
           </template>
@@ -631,6 +639,7 @@ onUnmounted(() => {
           </section>
           <a v-if="feedAdAt(index)" class="feed-ad" :href="feedAdAt(index).link_url || undefined" target="_blank" rel="noopener">
             <img v-if="feedAdAt(index).image_url" :src="feedAdAt(index).image_url" :alt="feedAdAt(index).title" loading="lazy" decoding="async" />
+            <b v-if="placeholder(feedAdAt(index))" class="ad-no">{{ feedAdAt(index).no }}</b>
             <span>{{ feedAdAt(index).title }}</span>
           </a>
           </template>
@@ -658,6 +667,7 @@ onUnmounted(() => {
           <div v-if="growthAds.length" class="slot-ads">
             <a v-for="ad in growthAds" :key="ad.id" :href="ad.link_url || undefined" target="_blank" rel="noopener">
               <img v-if="ad.image_url" :src="ad.image_url" :alt="ad.title" loading="lazy" decoding="async" />
+              <b v-if="placeholder(ad)" class="ad-no">{{ ad.no }}</b>
               <span>{{ ad.title }}</span>
             </a>
           </div>
@@ -677,6 +687,7 @@ onUnmounted(() => {
           <div v-if="totalAds.length" class="slot-ads">
             <a v-for="ad in totalAds" :key="ad.id" :href="ad.link_url || undefined" target="_blank" rel="noopener">
               <img v-if="ad.image_url" :src="ad.image_url" :alt="ad.title" loading="lazy" decoding="async" />
+              <b v-if="placeholder(ad)" class="ad-no">{{ ad.no }}</b>
               <span>{{ ad.title }}</span>
             </a>
           </div>
@@ -706,6 +717,7 @@ onUnmounted(() => {
         <section v-if="railAds.length" class="rail-ads">
           <a v-for="ad in railAds" :key="ad.id" :href="ad.link_url || undefined" target="_blank" rel="noopener">
             <img v-if="ad.image_url" :src="ad.image_url" :alt="ad.title" />
+            <b v-if="placeholder(ad)" class="ad-no">{{ ad.no }}</b>
             <span v-if="ad.title">{{ ad.title }}</span>
           </a>
         </section>
@@ -754,6 +766,7 @@ onUnmounted(() => {
       </div>
       <a v-if="footerAds.length" class="foot-ad" :href="footerAds[0].link_url || undefined" target="_blank" rel="noopener">
         <img v-if="footerAds[0].image_url" :src="footerAds[0].image_url" :alt="footerAds[0].title" loading="lazy" decoding="async" />
+        <b v-if="placeholder(footerAds[0])" class="ad-no">{{ footerAds[0].no }}</b>
       </a>
     </footer>
   </div>

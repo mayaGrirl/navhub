@@ -8,10 +8,10 @@ from fastapi import APIRouter, Cookie, Depends, File, HTTPException, Request, Up
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.crawl import fetch_meta
+from app.crawl import fetch_meta, schedule_jobs, start_job, stop_job
 from app.deps import db_session, require_admin, require_admin_setup
 from app.security import hash_password
-from app.models import Ad, AdminAlert, Announcement, AuthLog, Category, CrawlItem, CrawlJob, IpBan, Level, Link, NewsItem, Page, PointRule, Tab, User
+from app.models import Ad, AdminAlert, Announcement, AuthLog, Category, CrawlItem, CrawlJob, CrawlLog, IpBan, Level, Link, NewsItem, Page, PointRule, Tab, User
 from app.urls import norm_url
 router = APIRouter(prefix="/api/manage", tags=["admin"], dependencies=[Depends(require_admin)])
 setup_router = APIRouter(prefix="/api/manage", tags=["admin"])
@@ -346,7 +346,7 @@ def update_page(page_id: int, payload: dict, db: Session = Depends(db_session)):
 
 
 AD_SLOTS = [
-    ("banner", "首页顶部右侧", "搜索框右边", 10),
+    ("banner", "首页顶部右侧", "搜索框右边轮播", 10),
     ("strip", "首页栏目上方", "通栏横图", 20),
     ("github-growth", "首页右侧", "增量榜下面", 30),
     ("github-total", "首页右侧", "总量榜下面", 40),
@@ -398,25 +398,37 @@ def list_ads(db: Session = Depends(db_session)):
             "title_en": r.title_en,
             "title_zh": r.title_zh,
             "enabled": r.enabled,
+            "show_placeholder": bool(r.show_placeholder),
             "sort": r.sort,
+            "updated_at": r.updated_at.isoformat() if r.updated_at else "",
         }
         for r in rows
     ]
 
 
+CAROUSEL_SLOTS = {"banner"}
+
+
 @router.post("/ads")
 def create_ad(payload: dict, db: Session = Depends(db_session)):
+    slot = payload.get("slot") or ""
+    if slot not in CAROUSEL_SLOTS:
+        raise HTTPException(400, "ad slots are fixed")
     row = Ad(
-        slot=payload.get("slot") or "inline",
+        slot=slot,
         image_url=payload.get("image_url") or "",
         link_url=payload.get("link_url") or "",
         title_en=payload.get("title_en") or "",
         title_zh=payload.get("title_zh") or "",
         enabled=bool(payload.get("enabled", True)),
+        show_placeholder=bool(payload.get("show_placeholder", True)),
         sort=int(payload.get("sort") or 0),
+        updated_at=datetime.utcnow(),
     )
     db.add(row)
     db.commit()
+    from app.security import rds
+    rds.delete("home:zh", "home:en")
     return {"id": row.id}
 
 
@@ -430,6 +442,11 @@ def update_ad(ad_id: int, payload: dict, db: Session = Depends(db_session)):
             setattr(row, key, payload[key] or "")
     if "enabled" in payload:
         row.enabled = bool(payload["enabled"])
+    if "show_placeholder" in payload:
+        row.show_placeholder = bool(payload["show_placeholder"])
+    row.updated_at = datetime.utcnow()
+    from app.security import rds
+    rds.delete("home:zh", "home:en")
     if "sort" in payload:
         row.sort = int(payload["sort"] or 0)
     db.commit()
@@ -438,7 +455,17 @@ def update_ad(ad_id: int, payload: dict, db: Session = Depends(db_session)):
 
 @router.delete("/ads/{ad_id}")
 def delete_ad(ad_id: int, db: Session = Depends(db_session)):
-    raise HTTPException(400, "ad slots are fixed")
+    row = db.get(Ad, ad_id)
+    if not row or row.slot not in CAROUSEL_SLOTS:
+        raise HTTPException(400, "ad slots are fixed")
+    others = db.scalar(select(func.count()).select_from(Ad).where(Ad.slot == row.slot, Ad.id != row.id))
+    if not others:
+        raise HTTPException(400, "ad slots are fixed")
+    db.delete(row)
+    db.commit()
+    from app.security import rds
+    rds.delete("home:zh", "home:en")
+    return {"ok": True}
 
 
 @router.post("/uploads")
@@ -698,8 +725,24 @@ def jobs(db: Session = Depends(db_session)):
             "category_id": r.category_id,
             "interval_minutes": r.interval_minutes,
             "enabled": r.enabled,
-            "last_run_at": r.last_run_at.isoformat() if r.last_run_at else None,
+            "status": r.status or "idle",
+            "message": r.message or "",
+            "found_count": r.found_count or 0,
+            "last_run_at": r.last_run_at.isoformat() if r.last_run_at else "",
         }
+        for r in rows
+    ]
+
+
+@router.get("/crawl/logs")
+def crawl_logs(job_id: int = 0, db: Session = Depends(db_session)):
+    stmt = select(CrawlLog).order_by(CrawlLog.id.desc()).limit(80)
+    if job_id:
+        stmt = select(CrawlLog).where(CrawlLog.job_id == job_id).order_by(CrawlLog.id.desc()).limit(80)
+    rows = list(reversed(db.scalars(stmt).all()))
+    names = {row.id: row.name for row in db.scalars(select(CrawlJob)).all()}
+    return [
+        {"id": r.id, "job_id": r.job_id, "job": names.get(r.job_id, ""), "message": r.message, "created_at": r.created_at.isoformat() if r.created_at else ""}
         for r in rows
     ]
 
@@ -707,15 +750,72 @@ def jobs(db: Session = Depends(db_session)):
 @router.post("/crawl/jobs")
 def create_job(payload: dict, db: Session = Depends(db_session)):
     row = CrawlJob(
-        name=payload.get("name") or "job",
+        name=payload.get("name") or "采集任务",
         list_url=payload["list_url"],
         category_id=int(payload["category_id"]),
-        interval_minutes=int(payload.get("interval_minutes") or 1440),
-        enabled=bool(payload.get("enabled", True)),
+        interval_minutes=max(1, int(payload.get("interval_minutes") or 1440)),
+        enabled=True,
+        status="idle",
     )
     db.add(row)
     db.commit()
+    start_job(row.id)
     return {"id": row.id}
+
+
+@router.put("/crawl/jobs/{job_id}")
+def update_job(job_id: int, payload: dict, db: Session = Depends(db_session)):
+    row = db.get(CrawlJob, job_id)
+    if not row:
+        raise HTTPException(404, "not found")
+    if "name" in payload:
+        row.name = payload.get("name") or row.name
+    if "list_url" in payload:
+        row.list_url = payload.get("list_url") or row.list_url
+    if "category_id" in payload:
+        row.category_id = int(payload["category_id"])
+    if "interval_minutes" in payload:
+        row.interval_minutes = max(1, int(payload.get("interval_minutes") or 1440))
+    db.commit()
+    return {"ok": True}
+
+
+@router.post("/crawl/jobs/{job_id}/run")
+def run_job_now(job_id: int, db: Session = Depends(db_session)):
+    row = db.get(CrawlJob, job_id)
+    if not row:
+        raise HTTPException(404, "not found")
+    row.enabled = True
+    db.commit()
+    if not start_job(row.id):
+        raise HTTPException(400, "already running")
+    return {"ok": True}
+
+
+@router.post("/crawl/jobs/{job_id}/stop")
+def stop_job_now(job_id: int, db: Session = Depends(db_session)):
+    row = db.get(CrawlJob, job_id)
+    if not row:
+        raise HTTPException(404, "not found")
+    row.enabled = False
+    stop_job(row.id)
+    if row.status == "running":
+        row.status = "stopped"
+        row.message = "已停止"
+    db.commit()
+    return {"ok": True}
+
+
+@router.delete("/crawl/jobs/{job_id}")
+def delete_job(job_id: int, db: Session = Depends(db_session)):
+    row = db.get(CrawlJob, job_id)
+    if row:
+        stop_job(row.id)
+        for item in db.scalars(select(CrawlItem).where(CrawlItem.job_id == row.id, CrawlItem.status == "pending")).all():
+            db.delete(item)
+        db.delete(row)
+        db.commit()
+    return {"ok": True}
 
 
 @router.post("/crawl/fetch")

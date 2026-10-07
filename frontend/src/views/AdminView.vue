@@ -30,7 +30,7 @@ const editorTitle = computed(() => {
     page: ["编辑页面", "Edit page"],
     note: ["编辑公告", "Edit notice"],
     ad: ["编辑广告", "Edit ad"],
-    crawl: ["新增采集", "Fetch a page"],
+    crawl: ["编辑采集", "Edit crawl"],
     admin: ["新增管理员", "Add admin"],
     ban: ["禁用 IP", "Block IP"],
     password: ["重置密码", "Reset password"],
@@ -39,6 +39,21 @@ const editorTitle = computed(() => {
   return tx(pair[0], pair[1]);
 });
 const notice = ref("");
+const ask = ref(null);
+function confirmDelete(text, run) {
+  ask.value = { text, run };
+}
+async function acceptAsk() {
+  const job = ask.value;
+  ask.value = null;
+  notice.value = tx("正在删除…", "Deleting…");
+  try {
+    await job.run();
+    notice.value = tx("已删除", "Deleted");
+  } catch (err) {
+    notice.value = err.response?.data?.detail || tx("删除失败", "Delete failed");
+  }
+}
 const grain = ref("day");
 const trendFocus = ref("");
 function pickTrend(key) {
@@ -109,12 +124,29 @@ const noteKind = ref("ticker");
 const noteView = computed(() => pageOf(announcements.value.filter((row) => (noteKind.value === "popup" ? row.popup : !row.popup)), ["title_zh", "title_en", "body_zh"]));
 const adView = computed(() => {
   const order = slotGroups.flatMap((group) => group.items.map((item) => ({ ...item, page: group.page })));
-  const rows = order.map((item) => {
-    const row = ads.value.find((ad) => ad.slot === item.id) || { slot: item.id, title_zh: "", enabled: false, image_url: "" };
-    return { ...row, where: `${item.page} · ${item.where}` };
+  const rows = [];
+  order.forEach((item, index) => {
+    const matched = ads.value
+      .filter((ad) => ad.slot === item.id)
+      .sort((a, b) => (a.sort - b.sort) || (a.id - b.id));
+    const group = matched.length ? matched : [{ slot: item.id, title_zh: "", enabled: false, image_url: "", show_placeholder: true }];
+    group.forEach((row, slide) => {
+      const where = `${item.page} · ${item.where}`;
+      rows.push({
+        ...row,
+        where: item.carousel && group.length > 1 ? `${where} · 第 ${slide + 1} 张` : where,
+        no: index + 1,
+        carousel: !!item.carousel,
+        slideCount: group.length,
+      });
+    });
   });
   return pageOf(rows, ["where", "title_zh", "title_en"]);
 });
+const crawlKind = ref("jobs");
+const crawlLogs = ref([]);
+const logJob = ref(0);
+const jobView = computed(() => pageOf(jobs.value.map((row) => ({ ...row, category: categories.value.find((cat) => cat.id === row.category_id)?.title_zh || "" })), ["name", "list_url", "category", "status"]));
 const crawlView = computed(() => pageOf(items.value, ["title", "url"]));
 const userKind = ref("member");
 const memberView = computed(() => pageOf(users.value.filter((row) => row.role !== "admin"), ["email", "role", "last_ip", "plan"]));
@@ -128,7 +160,7 @@ const views = { links: linkView, structure: tabView, categories: catView, news: 
 const proxyKind = ref("alive");
 const activeView = computed(() => {
   if (section.value === "proxies" && proxyKind.value === "sources") return sourceView.value;
-  if (section.value === "users") return userKind.value === "admin" ? adminUserView.value : memberView.value;
+  if (section.value === "crawl") return crawlKind.value === "jobs" ? jobView.value : crawlView.value;
   return views[section.value] ? views[section.value].value : { rows: [], total: 0, pages: 1, current: 1 };
 });
 function togglePick(id, on) {
@@ -214,7 +246,7 @@ const catForm = ref({ tab_id: "", slug: "", title_en: "", title_zh: "" });
 const crawlForm = ref({ url: "", category_id: "" });
 const adForm = ref({ slot: "banner", title_zh: "广告位", title_en: "Ad slot", image_url: "/ad-placeholder.svg", link_url: "/contact", enabled: true, sort: 0 });
 const slotGroups = [
-  { page: "首页顶部右侧", items: [{ id: "banner", where: "搜索框右边" }] },
+  { page: "首页顶部右侧", items: [{ id: "banner", where: "搜索框右边轮播", carousel: true }] },
   { page: "首页栏目上方", items: [{ id: "strip", where: "通栏横图" }] },
   { page: "首页右侧", items: [
     { id: "github-growth", where: "增量榜下面" },
@@ -327,6 +359,18 @@ const plot = computed(() => {
     left,
     right: left + width,
   };
+});
+
+watch(section, (value) => {
+  if (value === "crawl") loadLogs();
+  if (value !== "crawl") return;
+  if (window.__crawlPoll) clearInterval(window.__crawlPoll);
+  window.__crawlPoll = setInterval(() => {
+    if (section.value === "crawl" && jobs.value.some((row) => row.status === "running")) {
+      load();
+      loadLogs();
+    }
+  }, 3000);
 });
 
 onMounted(async () => {
@@ -450,8 +494,10 @@ async function toggleTotp(enabled) {
   }
 }
 async function dropNews(id) {
-  await http.delete(`/manage/news/${id}`);
-  await load();
+  confirmDelete(tx("删除这条资讯？", "Delete this news item?"), async () => {
+    await http.delete(`/manage/news/${id}`);
+    await load();
+  });
 }
 async function saveNote() {
   await http.post("/manage/announcements", noteForm.value);
@@ -459,8 +505,22 @@ async function saveNote() {
   await load();
 }
 async function dropNote(id) {
-  await http.delete(`/manage/announcements/${id}`);
-  await load();
+  confirmDelete(tx("删除这条公告？", "Delete this notice?"), async () => {
+    await http.delete(`/manage/announcements/${id}`);
+    await load();
+  });
+}
+async function toggleNote(row) {
+  const source = announcements.value.find((item) => item.id === row.id);
+  if (!source) return;
+  const previous = !!source.enabled;
+  source.enabled = !previous;
+  try {
+    await http.put(`/manage/announcements/${source.id}`, { enabled: source.enabled });
+  } catch (err) {
+    source.enabled = previous;
+    notice.value = err.response?.data?.detail || "save failed";
+  }
 }
 
 async function saveLink() {
@@ -482,8 +542,37 @@ async function fetchCrawl() {
   await http.post("/manage/crawl/fetch", crawlForm.value);
   await load();
 }
+async function loadLogs() {
+  const { data } = await http.get("/manage/crawl/logs", { params: { job_id: logJob.value || 0 } });
+  crawlLogs.value = data;
+}
+async function stopJob(row) {
+  notice.value = tx("正在停止…", "Stopping…");
+  await http.post(`/manage/crawl/jobs/${row.id}/stop`);
+  notice.value = tx("已停止", "Stopped");
+  await load();
+}
+async function runJob(row) {
+  notice.value = tx("正在开始采集…", "Starting…");
+  await http.post(`/manage/crawl/jobs/${row.id}/run`);
+  notice.value = tx("已开始采集", "Started");
+  await load();
+}
+async function dropJob(id) {
+  confirmDelete(tx("删除这个采集任务？未收录的结果会一起删掉。", "Delete this crawl job and its pending items?"), async () => {
+    await http.delete(`/manage/crawl/jobs/${id}`);
+    await load();
+  });
+}
+function crawlStatus(row) {
+  const map = { running: ["采集中", "Running"], stopped: ["已停止", "Stopped"], done: ["完成", "Done"], error: ["失败", "Failed"], idle: ["等待", "Waiting"] };
+  const pair = map[row.status] || map.idle;
+  return tx(pair[0], pair[1]);
+}
 async function approve(id) {
+  notice.value = tx("正在收录…", "Approving…");
   await http.post(`/manage/crawl/items/${id}/approve`);
+  notice.value = tx("已收录", "Approved");
   await load();
 }
 async function saveAd() {
@@ -505,12 +594,16 @@ async function saveLevel(row) {
   await http.put(`/manage/levels/${row.level}`, { min_points: row.min_points, proxy_per_minute: row.proxy_per_minute });
 }
 async function dropProxy(url) {
-  await http.delete("/manage/proxies", { params: { url } });
-  await load();
+  confirmDelete(tx("删除这个代理？", "Delete this proxy?"), async () => {
+    await http.delete("/manage/proxies", { params: { url } });
+    await load();
+  });
 }
 async function dropSource(url) {
-  await http.delete("/manage/proxy-sources", { params: { url } });
-  await load();
+  confirmDelete(tx("删除这个代理源？", "Delete this source?"), async () => {
+    await http.delete("/manage/proxy-sources", { params: { url } });
+    await load();
+  });
 }
 function sourceLabel(source) {
   if (source === "user") return "用户提交";
@@ -523,14 +616,58 @@ function openNew(kind) {
     category: { tab_id: tabs.value[0]?.id || "", slug: "", title_en: "", title_zh: "", sort: 0, visible: true },
     note: { title_en: "", title_zh: "", body_en: "", body_zh: "", image_url: "", popup: noteKind.value === "popup", enabled: true },
     ad: { ...adForm.value, id: null },
-    crawl: { url: "", category_id: categories.value[0]?.id || "" },
+    crawl: { id: null, name: "", list_url: "", category_id: categories.value[0]?.id || "", interval_minutes: 1440 },
     admin: { email: "", password: "" },
     ban: { ip: "" },
   };
   editor.value = { kind, row: blank[kind] };
+  fillPick(blank[kind]);
 }
 function openEdit(kind, row) {
   editor.value = { kind, row: { ...row } };
+  fillPick(row);
+}
+const pickOpen = ref("");
+const tabQuery = ref("");
+const catQuery = ref("");
+function tabName(id) {
+  const tab = tabs.value.find((item) => item.id === id);
+  return tab ? (tab.title_zh || tab.title_en) : "";
+}
+function fillPick(row) {
+  const cat = categories.value.find((item) => item.id === row?.category_id);
+  const tabId = cat?.tab_id || row?.tab_id || "";
+  if (row) row._tab_id = tabId;
+  tabQuery.value = tabName(tabId);
+  catQuery.value = cat ? (cat.title_zh || cat.title_en) : "";
+  pickOpen.value = "";
+}
+const tabHits = computed(() => {
+  const q = tabQuery.value.trim().toLowerCase();
+  return tabs.value.filter((tab) => !q || `${tab.title_zh} ${tab.title_en}`.toLowerCase().includes(q)).slice(0, 12);
+});
+const catHits = computed(() => {
+  const tabId = editor.value?.row?._tab_id;
+  const q = catQuery.value.trim().toLowerCase();
+  return categories.value.filter((cat) => (!tabId || cat.tab_id === tabId) && (!q || `${cat.title_zh} ${cat.title_en}`.toLowerCase().includes(q))).slice(0, 12);
+});
+function chooseTab(tab) {
+  editor.value.row._tab_id = tab.id;
+  editor.value.row.tab_id = tab.id;
+  tabQuery.value = tab.title_zh || tab.title_en;
+  const still = categories.value.find((cat) => cat.id === editor.value.row.category_id && cat.tab_id === tab.id);
+  if (!still && editor.value.kind !== "category") {
+    editor.value.row.category_id = "";
+    catQuery.value = "";
+  }
+  pickOpen.value = "";
+}
+function chooseCat(cat) {
+  editor.value.row.category_id = cat.id;
+  editor.value.row._tab_id = cat.tab_id;
+  catQuery.value = cat.title_zh || cat.title_en;
+  tabQuery.value = tabName(cat.tab_id);
+  pickOpen.value = "";
 }
 async function bump(field) {
   if (!picked.value.length) return;
@@ -540,25 +677,60 @@ async function bump(field) {
   await load();
 }
 async function removeIds(path, ids) {
-  for (const id of ids) await http.delete(`${path}/${id}`);
-  picked.value = [];
+  const list = [...ids];
+  confirmDelete(tx(`删除选中的 ${list.length} 条？`, `Delete ${list.length} selected?`), async () => {
+    for (const id of list) await http.delete(`${path}/${id}`);
+    picked.value = [];
+    await load();
+  });
+}
+const dropOver = ref(false);
+async function uploadImageFile(file) {
+  if (!file || !file.type.startsWith("image/")) return;
+  const body = new FormData();
+  body.append("file", file);
+  const res = await http.post("/manage/uploads", body);
+  editor.value.row.image_url = res.data.url;
+  dropOver.value = false;
+}
+function onImagePick(event) {
+  uploadImageFile(event.target.files?.[0]);
+}
+async function addSlide(row) {
+  await http.post("/manage/ads", {
+    slot: row.slot,
+    title_zh: "广告位",
+    title_en: "Ad slot",
+    image_url: "",
+    link_url: "",
+    enabled: true,
+    show_placeholder: true,
+    sort: (row.sort || 0) + 1,
+  });
   await load();
 }
-async function uploadNoteImage(event) {
-  const file = event.target.files?.[0];
-  if (!file) return;
-  const body = new FormData();
-  body.append("file", file);
-  const res = await http.post("/manage/uploads", body);
-  editor.value.row.image_url = res.data.url;
+async function removeSlide(row) {
+  confirmDelete(tx("删除这一张轮播图？", "Delete this slide?"), async () => {
+    await http.delete(`/manage/ads/${row.id}`);
+    await load();
+  });
 }
-async function uploadAdImage(event) {
-  const file = event.target.files?.[0];
-  if (!file) return;
-  const body = new FormData();
-  body.append("file", file);
-  const res = await http.post("/manage/uploads", body);
-  editor.value.row.image_url = res.data.url;
+async function toggleAd(row, key) {
+  const source = ads.value.find((ad) => ad.id === row.id);
+  if (!source) return;
+  const previous = !!source[key];
+  source[key] = !previous;
+  try {
+    await http.put(`/manage/ads/${source.id}`, { [key]: source[key] });
+    source.updated_at = new Date().toISOString();
+  } catch (err) {
+    source[key] = previous;
+    notice.value = err.response?.data?.detail || "save failed";
+  }
+}
+function onImageDrop(event) {
+  dropOver.value = false;
+  uploadImageFile(event.dataTransfer?.files?.[0]);
 }
 async function saveEditor() {
   const { kind, row } = editor.value;
@@ -582,7 +754,8 @@ async function saveEditor() {
       if (row.id) await http.put(`/manage/ads/${row.id}`, row);
       else await http.post("/manage/ads", row);
     } else if (kind === "crawl") {
-      await http.post("/manage/crawl/fetch", row);
+      if (row.id) await http.put(`/manage/crawl/jobs/${row.id}`, row);
+      else await http.post("/manage/crawl/jobs", row);
     } else if (kind === "admin") {
       await http.post("/manage/admins", row);
     } else if (kind === "ban") {
@@ -645,8 +818,10 @@ async function addBan() {
   await load();
 }
 async function liftBan(ip) {
-  await http.delete("/manage/ip-bans", { params: { ip } });
-  await load();
+  confirmDelete(tx("解除这个 IP 的禁用？", "Remove this IP ban?"), async () => {
+    await http.delete("/manage/ip-bans", { params: { ip } });
+    await load();
+  });
 }
 async function setPlan(user, plan) {
   await http.put(`/manage/users/${user.id}`, { plan, days: 30 });
@@ -788,7 +963,11 @@ async function setProxy(user, payload) {
             <button type="button" :class="{ primary: noteKind === 'popup' }" @click="noteKind = 'popup'; pageNo = 1">{{ tx("弹框", "Popup") }}</button>
             <button class="primary" type="button" @click="openNew('note')">{{ tx("新增", "Add") }}</button>
           </template>
-          <button v-if="section === 'crawl'" class="primary" type="button" @click="openNew('crawl')">{{ tx("新增采集", "Fetch") }}</button>
+          <template v-if="section === 'crawl'">
+            <button type="button" :class="{ primary: crawlKind === 'jobs' }" @click="crawlKind = 'jobs'; pageNo = 1">{{ tx("采集任务", "Jobs") }}</button>
+            <button type="button" :class="{ primary: crawlKind === 'items' }" @click="crawlKind = 'items'; pageNo = 1">{{ tx("待收录", "Pending") }}</button>
+            <button v-if="crawlKind === 'jobs'" class="primary" type="button" @click="openNew('crawl')">{{ tx("新建任务", "New job") }}</button>
+          </template>
           <template v-if="section === 'proxies'">
             <button type="button" :class="{ primary: proxyKind === 'alive' }" @click="proxyKind = 'alive'; pageNo = 1">{{ tx("有效代理", "Working") }} {{ proxies.count || 0 }}</button>
             <button type="button" :class="{ primary: proxyKind === 'sources' }" @click="proxyKind = 'sources'; pageNo = 1">{{ tx("开源代理池", "Source lists") }} {{ proxies.sources || 0 }}</button>
@@ -855,11 +1034,13 @@ async function setProxy(user, payload) {
           <p v-if="error" class="security-error">{{ error === "invalid code" ? tx("验证码不正确，还没有绑定成功。", "That code is not valid, so nothing was changed.") : error }}</p>
         </div>
 
-        <div v-else class="table-scroll">
+        <div v-else :class="{ 'crawl-split': section === 'crawl' }">
+        <div class="crawl-main">
+        <div class="table-scroll">
           <table>
             <thead>
               <tr>
-                <th v-if="section !== 'ads'"><input type="checkbox" :checked="activeView.rows.length && activeView.rows.every((row) => picked.includes(row.id))" @change="togglePage(activeView.rows, $event.target.checked)" /></th>
+                <th v-if="section !== 'ads'" class="check"><input type="checkbox" :checked="activeView.rows.length && activeView.rows.every((row) => picked.includes(row.id))" @change="togglePage(activeView.rows, $event.target.checked)" /></th>
                 <template v-if="section === 'links'">
                   <th>{{ tx("名称", "Name") }}</th><th>{{ tx("地址", "URL") }}</th><th>{{ tx("来源", "Source") }}</th><th>{{ tx("收藏", "Saves") }}</th><th>{{ tx("推荐", "Picks") }}</th><th>{{ tx("点击", "Clicks") }}</th>
                 </template>
@@ -876,10 +1057,13 @@ async function setProxy(user, payload) {
                   <th>key</th><th>{{ tx("标题", "Title") }}</th>
                 </template>
                 <template v-else-if="section === 'notes'">
-                  <th>{{ tx("标题", "Title") }}</th><th>{{ tx("状态", "Status") }}</th><th>{{ tx("时间", "Time") }}</th>
+                  <th>{{ tx("图片", "Image") }}</th><th>{{ tx("标题", "Title") }}</th><th>{{ tx("状态", "Status") }}</th><th>{{ tx("时间", "Time") }}</th>
                 </template>
                 <template v-else-if="section === 'ads'">
-                  <th>{{ tx("图片", "Image") }}</th><th>{{ tx("位置", "Slot") }}</th><th>{{ tx("名称", "Name") }}</th><th>{{ tx("状态", "Status") }}</th>
+                  <th>{{ tx("图片", "Image") }}</th><th>{{ tx("位置", "Slot") }}</th><th>{{ tx("名称", "Name") }}</th><th>{{ tx("展示", "Shown") }}</th><th>{{ tx("占位图", "Placeholder") }}</th><th>{{ tx("更新时间", "Updated") }}</th>
+                </template>
+                <template v-else-if="section === 'crawl' && crawlKind === 'jobs'">
+                  <th>{{ tx("名称", "Name") }}</th><th>{{ tx("地址", "URL") }}</th><th>{{ tx("分类", "Category") }}</th><th>{{ tx("状态", "Status") }}</th><th>{{ tx("上次运行", "Last run") }}</th><th>{{ tx("条数", "Found") }}</th>
                 </template>
                 <template v-else-if="section === 'crawl'">
                   <th>{{ tx("标题", "Title") }}</th><th>{{ tx("地址", "URL") }}</th>
@@ -907,21 +1091,21 @@ async function setProxy(user, payload) {
             </thead>
             <tbody>
               <tr v-for="row in activeView.rows" :key="row.id || row.url || row.level">
-                <td v-if="section !== 'ads'"><input type="checkbox" :checked="picked.includes(row.id)" @change="togglePick(row.id, $event.target.checked)" /></td>
+                <td v-if="section !== 'ads'" class="check"><input type="checkbox" :checked="picked.includes(row.id)" @change="togglePick(row.id, $event.target.checked)" /></td>
                 <template v-if="section === 'links'">
-                  <td>{{ row.title_zh || row.title_en }}</td><td class="clip">{{ row.url }}</td><td>{{ sourceLabel(row.source) }}</td><td>{{ row.favorite_count }}</td><td>{{ row.recommend_count }}</td><td>{{ row.click_count }}</td>
+                  <td>{{ row.title_zh || row.title_en }}</td><td class="clip">{{ row.url }}</td><td><span class="tag">{{ sourceLabel(row.source) }}</span></td><td class="num">{{ row.favorite_count }}</td><td class="num">{{ row.recommend_count }}</td><td class="num">{{ row.click_count }}</td>
                   <td class="row-actions"><button type="button" @click="openEdit('link', row)">{{ tx("编辑", "Edit") }}</button><button type="button" @click="removeIds('/manage/links', [row.id])">{{ tx("删除", "Delete") }}</button></td>
                 </template>
                 <template v-else-if="section === 'structure'">
-                  <td>{{ row.id }}</td><td>{{ row.slug }}</td><td>{{ row.title_zh }}</td><td>{{ row.title_en }}</td><td>{{ row.kind }}</td><td>{{ row.sort }}</td><td>{{ row.visible ? tx("是", "Yes") : tx("否", "No") }}</td><td>{{ row.adult ? tx("是", "Yes") : tx("否", "No") }}</td>
+                  <td>{{ row.id }}</td><td>{{ row.slug }}</td><td>{{ row.title_zh }}</td><td>{{ row.title_en }}</td><td>{{ row.kind }}</td><td class="num">{{ row.sort }}</td><td><span class="tag" :class="{ on: row.visible }">{{ row.visible ? tx("显示", "On") : tx("隐藏", "Off") }}</span></td><td><span class="tag" :class="{ warn: row.adult }">{{ row.adult ? tx("是", "Yes") : tx("否", "No") }}</span></td>
                   <td class="row-actions"><button type="button" @click="openEdit('tab', row)">{{ tx("编辑", "Edit") }}</button><button type="button" @click="removeIds('/manage/tabs', [row.id])">{{ tx("删除", "Delete") }}</button></td>
                 </template>
                 <template v-else-if="section === 'categories'">
-                  <td>{{ row.id }}</td><td>{{ row.tab_id }}</td><td>{{ row.slug }}</td><td>{{ row.title_zh }}</td><td>{{ row.title_en }}</td><td>{{ row.sort }}</td><td>{{ row.visible ? tx("是", "Yes") : tx("否", "No") }}</td>
+                  <td>{{ row.id }}</td><td>{{ row.tab_id }}</td><td>{{ row.slug }}</td><td>{{ row.title_zh }}</td><td>{{ row.title_en }}</td><td class="num">{{ row.sort }}</td><td><span class="tag" :class="{ on: row.visible }">{{ row.visible ? tx("显示", "On") : tx("隐藏", "Off") }}</span></td>
                   <td class="row-actions"><button type="button" @click="openEdit('category', row)">{{ tx("编辑", "Edit") }}</button><button type="button" @click="removeIds('/manage/categories', [row.id])">{{ tx("删除", "Delete") }}</button></td>
                 </template>
                 <template v-else-if="section === 'news'">
-                  <td>{{ row.category }}</td><td>{{ row.title }}</td><td>{{ row.source }}</td>
+                  <td><span class="tag">{{ row.category }}</span></td><td class="clip">{{ row.title }}</td><td>{{ row.source }}</td>
                   <td class="row-actions"><button type="button" @click="dropNews(row.id)">{{ tx("删除", "Delete") }}</button></td>
                 </template>
                 <template v-else-if="section === 'pages'">
@@ -929,26 +1113,46 @@ async function setProxy(user, payload) {
                   <td class="row-actions"><button type="button" @click="openEdit('page', row)">{{ tx("编辑", "Edit") }}</button></td>
                 </template>
                 <template v-else-if="section === 'notes'">
-                  <td>{{ row.title_zh || row.title_en }}</td><td>{{ row.enabled ? tx("显示", "On") : tx("隐藏", "Off") }}</td><td>{{ (row.created_at || "").slice(0, 16).replace("T", " ") }}</td>
+                  <td><img v-if="row.image_url" class="ad-thumb" :src="row.image_url" alt="" /><span v-else class="ad-thumb empty"></span></td>
+                  <td class="clip">{{ row.title_zh || row.title_en }}</td>
+                  <td><button type="button" :class="{ primary: row.enabled }" @click="toggleNote(row)">{{ row.enabled ? tx("显示", "On") : tx("隐藏", "Off") }}</button></td>
+                  <td class="time">{{ (row.created_at || "").slice(0, 16).replace("T", " ") }}</td>
                   <td class="row-actions"><button type="button" @click="openEdit('note', row)">{{ tx("编辑", "Edit") }}</button><button type="button" @click="dropNote(row.id)">{{ tx("删除", "Delete") }}</button></td>
                 </template>
                 <template v-else-if="section === 'ads'">
-                  <td><img v-if="row.image_url" class="ad-thumb" :src="row.image_url" alt="" /></td>
+                  <td><span class="ad-thumb-wrap"><img class="ad-thumb" :src="row.image_url && row.image_url !== '/ad-placeholder.svg' ? row.image_url : '/ad-placeholder.svg'" alt="" /><b>{{ row.no }}</b></span></td>
                   <td>{{ row.where }}</td>
                   <td>{{ row.title_zh || row.title_en }}</td>
-                  <td>{{ row.enabled ? tx("显示", "On") : tx("关闭", "Off") }}</td>
-                  <td class="row-actions"><button type="button" @click="openEdit('ad', row)">{{ tx("编辑", "Edit") }}</button></td>
+                  <td><button type="button" :class="{ primary: row.enabled }" @click="toggleAd(row, 'enabled')">{{ row.enabled ? tx("展示", "Shown") : tx("不展示", "Hidden") }}</button></td>
+                  <td><button type="button" :class="{ primary: row.show_placeholder }" @click="toggleAd(row, 'show_placeholder')">{{ row.show_placeholder ? tx("开启", "On") : tx("关闭", "Off") }}</button></td>
+                  <td class="time">{{ (row.updated_at || "").slice(0, 16).replace("T", " ") }}</td>
+                  <td class="row-actions">
+                    <button v-if="row.carousel" type="button" @click="addSlide(row)">{{ tx("添加一组", "Add slide") }}</button>
+                    <button type="button" @click="openEdit('ad', row)">{{ tx("编辑", "Edit") }}</button>
+                    <button v-if="row.carousel && row.slideCount > 1" type="button" @click="removeSlide(row)">{{ tx("删除", "Delete") }}</button>
+                  </td>
+                </template>
+                <template v-else-if="section === 'crawl' && crawlKind === 'jobs'">
+                  <td>{{ row.name }}</td>
+                  <td class="clip">{{ row.list_url }}</td>
+                  <td>{{ row.category }}</td>
+                  <td><span class="tag" :class="{ on: row.status === 'running' || row.status === 'done', warn: row.status === 'error' }" :title="row.message || ''">{{ crawlStatus(row) }}</span></td>
+                  <td class="time">{{ (row.last_run_at || "").slice(0, 16).replace("T", " ") }}</td>
+                  <td class="num">{{ row.found_count || 0 }}</td>
+                  <td class="row-actions">
+                    <button type="button" @click="openEdit('crawl', row)">{{ tx("编辑", "Edit") }}</button>
+                    <button v-if="row.status === 'running'" type="button" @click="stopJob(row)">{{ tx("停止", "Stop") }}</button>
+                    <button v-else type="button" @click="runJob(row)">{{ tx("开始", "Run") }}</button>
+                    <button type="button" @click="logJob = row.id; loadLogs(); notice = tx('已打开这条任务的记录', 'Showing this job')">{{ tx("记录", "Log") }}</button>
+                    <button type="button" @click="dropJob(row.id)">{{ tx("删除", "Delete") }}</button>
+                  </td>
                 </template>
                 <template v-else-if="section === 'crawl'">
                   <td>{{ row.title }}</td><td class="clip">{{ row.url }}</td>
                   <td class="row-actions"><button type="button" @click="approve(row.id)">{{ tx("收录", "Approve") }}</button></td>
                 </template>
                 <template v-else-if="section === 'users' && userKind === 'admin'">
-                  <td>{{ row.email }}</td>
-                  <td>{{ row.display_name || "—" }}</td>
-                  <td>{{ totpText(row) }}</td>
-                  <td>{{ row.last_ip || "—" }}</td>
-                  <td>{{ (row.created_at || "").slice(0, 10) }}</td>
+                  <td>{{ row.email }}</td><td>{{ row.display_name || "—" }}</td><td><span class="tag" :class="{ on: row.totp_confirmed && row.totp_enabled, warn: row.totp_confirmed && !row.totp_enabled }">{{ totpText(row) }}</span></td><td>{{ row.last_ip || "—" }}</td><td class="time">{{ (row.created_at || "").slice(0, 10) }}</td>
                   <td class="row-actions">
                     <button type="button" @click="resetPassword(row)">{{ tx("重置密码", "Reset password") }}</button>
                     <button type="button" @click="resetTotp(row)">{{ tx("重置验证器", "Reset authenticator") }}</button>
@@ -958,7 +1162,7 @@ async function setProxy(user, payload) {
                 <template v-else-if="section === 'users'">
                   <td>{{ row.email }}</td>
                   <td>{{ row.display_name || "—" }}</td>
-                  <td>{{ row.plan === "vip" ? "VIP" : tx("免费", "Free") }}</td>
+                  <td><span class="tag" :class="{ on: row.plan === 'vip' }">{{ row.plan === "vip" ? "VIP" : tx("免费", "Free") }}</span></td>
                   <td>Lv.{{ row.level }} · {{ row.points }}</td>
                   <td>
                     <div class="proxy-edit">
@@ -967,7 +1171,7 @@ async function setProxy(user, payload) {
                     </div>
                   </td>
                   <td>{{ row.banned ? tx("已禁用", "Disabled") : (row.last_ip || "—") }}</td>
-                  <td>{{ (row.created_at || "").slice(0, 10) }}</td>
+                  <td class="time">{{ (row.created_at || "").slice(0, 10) }}</td>
                   <td class="row-actions">
                     <button type="button" @click="setPlan(row, row.plan === 'vip' ? 'free' : 'vip')">{{ row.plan === "vip" ? tx("改免费", "Make free") : tx("改 VIP", "Make VIP") }}</button>
                     <button type="button" @click="resetPassword(row)">{{ tx("重置密码", "Reset password") }}</button>
@@ -1012,9 +1216,32 @@ async function setProxy(user, payload) {
           <input v-model.number="jumpNo" type="number" min="1" :max="activeView.pages" @keyup.enter="goPage(jumpNo)" @change="goPage(jumpNo)" />
           <span>{{ tx("页", "") }}</span>
         </div>
+        </div>
+        <div v-if="section === 'crawl'" class="crawl-console">
+          <header>
+            <strong>{{ tx("执行记录", "Run log") }}</strong>
+            <select v-model.number="logJob" @change="loadLogs">
+              <option :value="0">{{ tx("全部任务", "All jobs") }}</option>
+              <option v-for="row in jobs" :key="row.id" :value="row.id">{{ row.name }}</option>
+            </select>
+          </header>
+          <pre v-if="crawlLogs.length"><span v-for="line in crawlLogs" :key="line.id">{{ (line.created_at || "").slice(11, 19) }}  {{ line.job }}  {{ line.message }}
+</span></pre>
+          <p v-else>{{ tx("还没有执行记录", "No log yet") }}</p>
+        </div>
+        </div>
       </section>
 
-      <div v-if="editor" class="console-modal" @click.self="editor = null">
+      <div v-if="ask" class="console-modal" @click.self="ask = null">
+        <form class="dialog ask" @submit.prevent="acceptAsk">
+          <header><h3>{{ tx("确认删除", "Confirm delete") }}</h3><button class="dialog-x" type="button" @click="ask = null">×</button></header>
+          <div class="dialog-body"><p>{{ ask.text }}</p></div>
+          <footer>
+            <button type="button" @click="ask = null">{{ tx("取消", "Cancel") }}</button>
+            <button class="primary" type="submit">{{ tx("确认删除", "Delete") }}</button>
+          </footer>
+        </form>
+      </div>
         <form class="dialog" @submit.prevent="saveEditor">
           <header>
             <h3>{{ editorTitle }}</h3>
@@ -1022,7 +1249,22 @@ async function setProxy(user, payload) {
           </header>
           <div class="dialog-body">
             <template v-if="editor.kind === 'link'">
-              <label class="field"><span>{{ tx("分类", "Category") }}</span><select v-model="editor.row.category_id"><option v-for="cat in categories" :key="cat.id" :value="cat.id">{{ cat.title_zh || cat.title_en }}</option></select></label>
+              <div class="field pick">
+                <span>{{ tx("栏目", "Tab") }}</span>
+                <input v-model="tabQuery" :placeholder="tx('输入栏目名称', 'Type a tab')" @focus="pickOpen = 'tab'" @input="pickOpen = 'tab'" />
+                <ul v-if="pickOpen === 'tab'">
+                  <li v-for="tab in tabHits" :key="tab.id" @mousedown.prevent="chooseTab(tab)">{{ tab.title_zh || tab.title_en }}</li>
+                  <li v-if="!tabHits.length" class="empty">{{ tx("没有匹配的栏目", "No matching tab") }}</li>
+                </ul>
+              </div>
+              <div class="field pick">
+                <span>{{ tx("分类", "Category") }}</span>
+                <input v-model="catQuery" :placeholder="tx('输入分类名称', 'Type a category')" @focus="pickOpen = 'cat'" @input="pickOpen = 'cat'" />
+                <ul v-if="pickOpen === 'cat'">
+                  <li v-for="cat in catHits" :key="cat.id" @mousedown.prevent="chooseCat(cat)">{{ cat.title_zh || cat.title_en }}</li>
+                  <li v-if="!catHits.length" class="empty">{{ tx("没有匹配的分类", "No matching category") }}</li>
+                </ul>
+              </div>
               <label class="field"><span>{{ tx("地址", "URL") }}</span><input v-model="editor.row.url" placeholder="https://" required /></label>
               <label class="field"><span>{{ tx("中文名称", "Chinese name") }}</span><input v-model="editor.row.title_zh" /></label>
               <label class="field"><span>{{ tx("英文名称", "English name") }}</span><input v-model="editor.row.title_en" /></label>
@@ -1041,7 +1283,14 @@ async function setProxy(user, payload) {
               <label class="field choice"><span>18+</span><input type="checkbox" v-model="editor.row.adult" /></label>
             </template>
             <template v-else-if="editor.kind === 'category'">
-              <label class="field"><span>{{ tx("栏目", "Tab") }}</span><select v-model="editor.row.tab_id"><option v-for="tab in tabs" :key="tab.id" :value="tab.id">{{ tab.title_zh || tab.title_en }}</option></select></label>
+              <div class="field pick">
+                <span>{{ tx("栏目", "Tab") }}</span>
+                <input v-model="tabQuery" :placeholder="tx('输入栏目名称', 'Type a tab')" @focus="pickOpen = 'tab'" @input="pickOpen = 'tab'" />
+                <ul v-if="pickOpen === 'tab'">
+                  <li v-for="tab in tabHits" :key="tab.id" @mousedown.prevent="chooseTab(tab)">{{ tab.title_zh || tab.title_en }}</li>
+                  <li v-if="!tabHits.length" class="empty">{{ tx("没有匹配的栏目", "No matching tab") }}</li>
+                </ul>
+              </div>
               <label class="field"><span>slug</span><input v-model="editor.row.slug" required /></label>
               <label class="field"><span>{{ tx("中文名", "Chinese name") }}</span><input v-model="editor.row.title_zh" /></label>
               <label class="field"><span>{{ tx("英文名", "English name") }}</span><input v-model="editor.row.title_en" /></label>
@@ -1062,22 +1311,55 @@ async function setProxy(user, payload) {
               <label class="field"><span>{{ tx("英文标题", "English title") }}</span><input v-model="editor.row.title_en" /></label>
               <label class="field wide"><span>{{ tx("中文正文", "Chinese body") }}</span><textarea v-model="editor.row.body_zh" rows="4"></textarea></label>
               <label class="field wide"><span>{{ tx("英文正文", "English body") }}</span><textarea v-model="editor.row.body_en" rows="4"></textarea></label>
-              <label class="field wide"><span>{{ tx("图片", "Image") }}</span><input type="file" accept="image/*" @change="uploadNoteImage" /></label>
-              <img v-if="editor.row.image_url" class="ad-preview" :src="editor.row.image_url" alt="" />
+              <div class="field wide">
+                <span>{{ tx("图片", "Image") }}</span>
+                <label class="dropzone" :class="{ over: dropOver }" @dragover.prevent="dropOver = true" @dragleave.prevent="dropOver = false" @drop.prevent="onImageDrop">
+                  <img v-if="editor.row.image_url" :src="editor.row.image_url" alt="" />
+                  <em>{{ tx("拖到这里，或点击选择图片", "Drop an image here, or click to choose") }}</em>
+                  <input type="file" accept="image/*" @change="onImagePick" />
+                </label>
+              </div>
               <label class="field choice"><span>{{ tx("显示", "Visible") }}</span><input type="checkbox" v-model="editor.row.enabled" /></label>
             </template>
             <template v-else-if="editor.kind === 'ad'">
-              <label class="field wide"><span>{{ tx("位置", "Slot") }}</span><input :value="slotWhere(editor.row.slot)" readonly /></label>
+              <div class="field wide">
+                <span>{{ tx("位置", "Slot") }}</span>
+                <p class="slot-lock">{{ slotWhere(editor.row.slot) }}</p>
+              </div>
               <label class="field"><span>{{ tx("中文名称", "Chinese name") }}</span><input v-model="editor.row.title_zh" /></label>
               <label class="field"><span>{{ tx("英文名称", "English name") }}</span><input v-model="editor.row.title_en" /></label>
-              <label class="field wide"><span>{{ tx("图片", "Image") }}</span><input type="file" accept="image/*" @change="uploadAdImage" /></label>
-              <img v-if="editor.row.image_url" class="ad-preview" :src="editor.row.image_url" alt="" />
+              <div class="field wide">
+                <span>{{ tx("图片", "Image") }}</span>
+                <label class="dropzone" :class="{ over: dropOver }" @dragover.prevent="dropOver = true" @dragleave.prevent="dropOver = false" @drop.prevent="onImageDrop">
+                  <img v-if="editor.row.image_url" :src="editor.row.image_url" alt="" />
+                  <em>{{ tx("拖到这里，或点击选择图片", "Drop an image here, or click to choose") }}</em>
+                  <input type="file" accept="image/*" @change="onImagePick" />
+                </label>
+              </div>
               <label class="field"><span>{{ tx("跳转地址", "Link") }}</span><input v-model="editor.row.link_url" /></label>
-              <label class="field choice"><span>{{ tx("显示", "Visible") }}</span><input type="checkbox" v-model="editor.row.enabled" /></label>
+              <label class="field choice"><span>{{ tx("展示", "Shown") }}</span><input type="checkbox" v-model="editor.row.enabled" /></label>
+              <label class="field choice"><span>{{ tx("占位图", "Placeholder") }}</span><input type="checkbox" v-model="editor.row.show_placeholder" /></label>
             </template>
             <template v-else-if="editor.kind === 'crawl'">
-              <label class="field"><span>{{ tx("地址", "URL") }}</span><input v-model="editor.row.url" placeholder="https://" required /></label>
-              <label class="field"><span>{{ tx("分类", "Category") }}</span><select v-model="editor.row.category_id"><option v-for="cat in categories" :key="cat.id" :value="cat.id">{{ cat.title_zh || cat.title_en }}</option></select></label>
+              <label class="field"><span>{{ tx("名称", "Name") }}</span><input v-model="editor.row.name" required /></label>
+              <label class="field wide"><span>{{ tx("列表地址", "List URL") }}</span><input v-model="editor.row.list_url" placeholder="https://" required /></label>
+              <div class="field pick">
+                <span>{{ tx("栏目", "Tab") }}</span>
+                <input v-model="tabQuery" :placeholder="tx('输入栏目名称', 'Type a tab')" @focus="pickOpen = 'tab'" @input="pickOpen = 'tab'" />
+                <ul v-if="pickOpen === 'tab'">
+                  <li v-for="tab in tabHits" :key="tab.id" @mousedown.prevent="chooseTab(tab)">{{ tab.title_zh || tab.title_en }}</li>
+                  <li v-if="!tabHits.length" class="empty">{{ tx("没有匹配的栏目", "No matching tab") }}</li>
+                </ul>
+              </div>
+              <div class="field pick">
+                <span>{{ tx("分类", "Category") }}</span>
+                <input v-model="catQuery" :placeholder="tx('输入分类名称', 'Type a category')" @focus="pickOpen = 'cat'" @input="pickOpen = 'cat'" />
+                <ul v-if="pickOpen === 'cat'">
+                  <li v-for="cat in catHits" :key="cat.id" @mousedown.prevent="chooseCat(cat)">{{ cat.title_zh || cat.title_en }}</li>
+                  <li v-if="!catHits.length" class="empty">{{ tx("没有匹配的分类", "No matching category") }}</li>
+                </ul>
+              </div>
+              <label class="field"><span>{{ tx("间隔（分钟）", "Interval (minutes)") }}</span><input v-model.number="editor.row.interval_minutes" type="number" min="1" /></label>
             </template>
             <template v-else-if="editor.kind === 'admin'">
               <label class="field"><span>{{ tx("邮箱", "Email") }}</span><input v-model="editor.row.email" type="email" required /></label>

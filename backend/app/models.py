@@ -152,7 +152,9 @@ class Ad(Base):
     title_en: Mapped[str] = mapped_column(String(160), default="")
     title_zh: Mapped[str] = mapped_column(String(160), default="")
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    show_placeholder: Mapped[bool] = mapped_column(Boolean, default=True)
     sort: Mapped[int] = mapped_column(Integer, default=0)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
 class Page(Base):
@@ -218,7 +220,19 @@ class CrawlJob(Base):
     category_id: Mapped[int] = mapped_column(ForeignKey("categories.id"))
     interval_minutes: Mapped[int] = mapped_column(Integer, default=1440)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    status: Mapped[str] = mapped_column(String(20), default="idle")
+    message: Mapped[str] = mapped_column(String(500), default="")
+    found_count: Mapped[int] = mapped_column(Integer, default=0)
     last_run_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class CrawlLog(Base):
+    __tablename__ = "crawl_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    job_id: Mapped[int] = mapped_column(Integer, index=True)
+    message: Mapped[str] = mapped_column(String(500), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
 class CrawlItem(Base):

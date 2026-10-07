@@ -42,6 +42,7 @@ onMounted(load);
     <aside v-if="ads.length" class="doc-ads">
       <a v-for="ad in ads" :key="ad.id" :href="ad.link_url || undefined" target="_blank" rel="noopener">
         <img v-if="ad.image_url" :src="ad.image_url" :alt="ad.title" loading="lazy" decoding="async" />
+        <b v-if="!ad.image_url || ad.image_url.endsWith('ad-placeholder.svg')" class="ad-no">{{ ad.no }}</b>
         <span>{{ ad.title }}</span>
       </a>
     </aside>

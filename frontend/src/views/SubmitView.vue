@@ -420,6 +420,7 @@ curl -x http://1.2.3.4:8080 https://example.com</pre>
       </section>
       <a v-if="ads[0]" :href="ads[0].link_url || undefined" target="_blank" rel="noopener">
         <img v-if="ads[0].image_url" :src="ads[0].image_url" :alt="ads[0].title" loading="lazy" decoding="async" />
+        <b v-if="!ads[0].image_url || ads[0].image_url.endsWith('ad-placeholder.svg')" class="ad-no">{{ ads[0].no }}</b>
         <span>{{ ads[0].title }}</span>
       </a>
       <section>
@@ -435,6 +436,7 @@ curl -x http://1.2.3.4:8080 https://example.com</pre>
       </section>
       <a v-for="ad in ads.slice(1)" :key="ad.id" :href="ad.link_url || undefined" target="_blank" rel="noopener">
         <img v-if="ad.image_url" :src="ad.image_url" :alt="ad.title" loading="lazy" decoding="async" />
+        <b v-if="!ad.image_url || ad.image_url.endsWith('ad-placeholder.svg')" class="ad-no">{{ ad.no }}</b>
         <span>{{ ad.title }}</span>
       </a>
     </aside>
