@@ -73,7 +73,7 @@ def _tab(row: Tab) -> dict:
 
 @router.get("/tabs")
 def list_tabs(db: Session = Depends(db_session)):
-    return [_tab(row) for row in db.scalars(select(Tab).order_by(Tab.sort, Tab.id)).all()]
+    return [_tab(row) for row in db.scalars(select(Tab).order_by(Tab.sort.desc(), Tab.id)).all()]
 
 
 @router.post("/tabs")
@@ -122,7 +122,7 @@ def delete_tab(tab_id: int, db: Session = Depends(db_session)):
 
 @router.get("/categories")
 def list_categories(tab_id: int | None = None, db: Session = Depends(db_session)):
-    stmt = select(Category).order_by(Category.sort, Category.id)
+    stmt = select(Category).order_by(Category.sort.desc(), Category.id)
     if tab_id:
         stmt = stmt.where(Category.tab_id == tab_id)
     rows = db.scalars(stmt).all()
@@ -466,17 +466,24 @@ def delete_announcement(item_id: int, db: Session = Depends(db_session)):
 
 @router.get("/users")
 def users(db: Session = Depends(db_session)):
-    rows = db.scalars(select(User).order_by(User.id.desc()).limit(200)).all()
+    rows = db.scalars(select(User).order_by(User.id.desc()).limit(1000)).all()
+    levels = db.scalars(select(Level).where(Level.level <= 10).order_by(Level.min_points.desc(), Level.level.desc())).all()
     return [
         {
             "id": r.id,
             "email": r.email,
+            "display_name": r.display_name or "",
             "role": r.role,
             "plan": r.plan,
+            "points": r.points or 0,
+            "level": next((item.level for item in levels if (r.points or 0) >= item.min_points), 0),
+            "created_at": r.created_at.isoformat() if r.created_at else "",
             "plan_expires_at": r.plan_expires_at.isoformat() if r.plan_expires_at else None,
             "totp_enabled": r.totp_enabled,
             "banned": bool(r.banned),
             "last_ip": r.last_ip or "",
+            "proxy_unlimited": bool(r.proxy_unlimited),
+            "proxy_limit": r.proxy_limit,
         }
         for r in rows
     ]
@@ -499,6 +506,11 @@ def update_user(user_id: int, payload: dict, db: Session = Depends(db_session), 
                 db.add(IpBan(ip=row.last_ip, reason="admin"))
             if not row.banned and existing:
                 db.delete(existing)
+    if "proxy_unlimited" in payload:
+        row.proxy_unlimited = bool(payload["proxy_unlimited"])
+    if "proxy_limit" in payload:
+        raw = payload.get("proxy_limit")
+        row.proxy_limit = None if raw in (None, "") else max(0, int(raw))
     if payload.get("plan") in {"free", "vip"}:
         row.plan = payload["plan"]
         if row.plan == "vip":
@@ -715,10 +727,28 @@ def save_point_rule(payload: dict, db: Session = Depends(db_session)):
     return {"points_per_link": row.points_per_link}
 
 
+def _open_lists() -> list[str]:
+    import importlib.util
+    from pathlib import Path
+
+    path = Path(__file__).resolve().parents[3] / "proxy-pool" / "sources.py"
+    spec = importlib.util.spec_from_file_location("pool_sources", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return list(module.LISTS)
+
+
 @router.get("/proxies")
 def proxies():
+    lists = _open_lists()
     base = _pool()
-    empty = {"count": 0, "sources": 0, "items": [], "source_items": [], "note": "proxy pool is not running"}
+    empty = {
+        "count": 0,
+        "sources": len(lists),
+        "items": [],
+        "source_items": [{"id": index + 1, "url": url} for index, url in enumerate(lists)],
+        "note": "proxy pool is not running",
+    }
     if not base:
         empty["note"] = "PROXY_POOL_URL is empty"
         return empty
@@ -728,8 +758,14 @@ def proxies():
         alive.raise_for_status()
         sources.raise_for_status()
         data = alive.json()
-        data["source_items"] = sources.json().get("items", [])
-        data["sources"] = len(data["source_items"]) or data.get("sources", 0)
+        stored = sources.json().get("items", [])
+        seen = {item.get("url") for item in stored}
+        for url in lists:
+            if url not in seen:
+                stored.append({"id": None, "url": url})
+        data["source_items"] = stored
+        data["sources"] = len(stored)
+        data["note"] = "每 3 分钟检测一次，打不开的代理会删掉。"
         return data
     except httpx.HTTPError:
         return empty

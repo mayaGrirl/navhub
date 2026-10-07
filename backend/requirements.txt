@@ -5,6 +5,7 @@ pymysql==1.1.1
 redis==5.2.1
 httpx==0.28.1
 pyotp==2.9.0
+segno==1.6.1
 python-multipart==0.0.20
 pydantic-settings==2.7.1
 beautifulsoup4==4.12.3

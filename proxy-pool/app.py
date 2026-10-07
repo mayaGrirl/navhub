@@ -80,11 +80,17 @@ def maintain() -> dict:
     added = 0
     removed = 0
     try:
-        existing = {row.list_url for row in db.scalars(select(Source)).all()}
-        for url in LISTS:
-            if url not in existing:
+        allowed = list(dict.fromkeys(LISTS))
+        allowed_set = set(allowed)
+        seen = set()
+        for row in list(db.scalars(select(Source)).all()):
+            if row.list_url not in allowed_set or row.list_url in seen:
+                db.delete(row)
+                continue
+            seen.add(row.list_url)
+        for url in allowed:
+            if url not in seen:
                 db.add(Source(list_url=url))
-                existing.add(url)
         db.commit()
         candidates = []
         for source in db.scalars(select(Source)).all():
@@ -113,7 +119,7 @@ def maintain() -> dict:
                 removed += 1
         db.commit()
         count = len(db.scalars(select(Proxy)).all())
-        print("proxy pool", "added", added, "removed", removed, "kept", count, "sources", len(LISTS))
+        print("proxy pool", "added", added, "removed", removed, "kept", count, "sources", len(allowed))
         return {"added": added, "removed": removed, "kept": count}
     finally:
         db.close()

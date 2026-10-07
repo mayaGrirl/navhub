@@ -39,6 +39,12 @@ const submissionTotal = ref(0);
 const showForm = ref(false);
 const copied = ref("");
 const proxyLink = computed(() => proxyToken.value ? `${origin.value}/api/proxy/acquire?token=${encodeURIComponent(proxyToken.value)}` : "");
+const proxyText = computed(() => {
+  if (!levelInfo.value) return "";
+  if (levelInfo.value.proxy_unlimited) return locale.value === "zh" ? "白名单，不限次数" : "Unlimited";
+  if (levelInfo.value.proxy_limit != null) return locale.value === "zh" ? `每分钟 ${levelInfo.value.proxy_limit} 次` : `${levelInfo.value.proxy_limit} per minute`;
+  return locale.value === "zh" ? `按等级，每分钟 ${levelInfo.value.proxy_per_minute} 次` : `${levelInfo.value.proxy_per_minute} per minute by level`;
+});
 
 onMounted(async () => {
   try {
@@ -264,6 +270,9 @@ async function logout() {
       <h1>{{ t("profile") }}</h1>
       <label>{{ t("email") }}</label>
       <input :value="user.email" readonly />
+      <p class="meta" v-if="levelInfo">{{ locale === "zh" ? `Lv.${levelInfo.level} · ${levelInfo.points} 积分 · ${user.plan === "vip" ? "VIP" : "免费会员"}` : `Lv.${levelInfo.level} · ${levelInfo.points} pts · ${user.plan === "vip" ? "VIP" : "Free"}` }}</p>
+      <p class="meta">{{ locale === "zh" ? `代理：${proxyText}` : `Proxy: ${proxyText}` }}</p>
+      <p class="meta">{{ locale === "zh" ? `最近 IP：${user.last_ip || "还没有记录"}` : `Last IP: ${user.last_ip || "Not recorded yet"}` }}</p>
       <label>{{ t("nickname") }}</label>
       <input v-model="name" maxlength="40" :placeholder="t('nickname')" />
       <button class="primary" type="button" @click="saveProfile">{{ t("save") }}</button>
@@ -375,7 +384,7 @@ async function logout() {
     </section>
     <section v-else-if="tab === 'proxy'" class="page form proxy-doc">
       <h1>{{ t("proxyPool") }}</h1>
-      <p>{{ locale === "zh" ? `代理池是单独维护的服务。这里只给已登录用户发放调用令牌，令牌和登录会话无关。每次返回一个当前可用的 HTTP 代理。当前等级每分钟最多 ${levelInfo?.proxy_per_minute || 10} 次。` : `The proxy pool is a separate service. This page only issues a call token for signed-in users. The token is not your login session. Each call returns one working HTTP proxy. Your level allows ${levelInfo?.proxy_per_minute || 10} calls per minute.` }}</p>
+      <p>{{ locale === "zh" ? `代理池是单独维护的服务。这里只给已登录用户发放调用令牌，令牌和登录会话无关。每次返回一个当前可用的 HTTP 代理。当前额度：${proxyText}。` : `The proxy pool is a separate service. This page only issues a call token for signed-in users. The token is not your login session. Each call returns one working HTTP proxy. Current allowance: ${proxyText}.` }}</p>
       <button class="primary" type="button" @click="makeProxyToken">{{ locale === "zh" ? "生成令牌" : "Generate token" }}</button>
       <div v-if="proxyToken" class="copy-row">
         <pre>{{ proxyToken }}</pre>

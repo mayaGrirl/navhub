@@ -18,12 +18,37 @@ const missing = ref(false);
 const section = ref("overview");
 const query = ref("");
 const pageNo = ref(1);
-const pageSize = 10;
+const pageSize = ref(10);
+const jumpNo = ref(1);
 const picked = ref([]);
 const editor = ref(null);
 const notice = ref("");
 const grain = ref("day");
-const trend = ref({ labels: [], register: [], login: [], total: [] });
+const trendFocus = ref("");
+function pickTrend(key) {
+  trendFocus.value = trendFocus.value === key ? "" : key;
+}
+function trendOn(key) {
+  return !trendFocus.value || trendFocus.value === key;
+}
+function emptyTrend(kind) {
+  const labels = [];
+  const now = new Date();
+  if (kind === "month") {
+    for (let i = 11; i >= 0; i -= 1) {
+      const date = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      labels.push(`${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`);
+    }
+  } else {
+    for (let i = 13; i >= 0; i -= 1) {
+      const date = new Date(now.getFullYear(), now.getMonth(), now.getDate() - i);
+      labels.push(`${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`);
+    }
+  }
+  const zeros = labels.map(() => 0);
+  return { labels, register: [...zeros], login: [...zeros], total: [...zeros] };
+}
+const trend = ref(emptyTrend("day"));
 const sectionTitle = computed(() => ({
   overview: tx("概览", "Overview"),
   alerts: tx("报警", "Alerts"),
@@ -40,14 +65,24 @@ const sectionTitle = computed(() => ({
   levels: tx("等级", "Levels"),
   security: tx("账号安全", "Security"),
 }[section.value] || ""));
-watch(section, () => { query.value = ""; pageNo.value = 1; picked.value = []; editor.value = null; notice.value = ""; });
-watch(query, () => { pageNo.value = 1; picked.value = []; });
+watch(section, () => { query.value = ""; pageNo.value = 1; jumpNo.value = 1; picked.value = []; editor.value = null; notice.value = ""; });
+watch(query, () => { pageNo.value = 1; jumpNo.value = 1; picked.value = []; });
 function pageOf(rows, keys) {
   const text = query.value.trim().toLowerCase();
   const filtered = text ? rows.filter((row) => keys.some((key) => String(row[key] ?? "").toLowerCase().includes(text))) : rows.slice();
-  const pages = Math.max(1, Math.ceil(filtered.length / pageSize) || 1);
+  const size = pageSize.value;
+  const pages = Math.max(1, Math.ceil(filtered.length / size) || 1);
   const current = Math.min(pageNo.value, pages);
-  return { rows: filtered.slice((current - 1) * pageSize, current * pageSize), total: filtered.length, pages, current };
+  return { rows: filtered.slice((current - 1) * size, current * size), total: filtered.length, pages, current };
+}
+function goPage(n) {
+  const pages = activeView.value.pages || 1;
+  pageNo.value = Math.max(1, Math.min(pages, Number(n) || 1));
+  jumpNo.value = pageNo.value;
+}
+function changePageSize() {
+  pageNo.value = 1;
+  jumpNo.value = 1;
 }
 const linkView = computed(() => pageOf(links.value.map((row) => ({ ...row, name: row.title_zh || row.title_en })), ["name", "url", "status", "source"]));
 const tabView = computed(() => pageOf(tabs.value, ["title_zh", "title_en", "slug"]));
@@ -57,14 +92,21 @@ const pageView = computed(() => pageOf(pages.value, ["key", "title_zh", "title_e
 const noteView = computed(() => pageOf(announcements.value, ["title_zh", "title_en", "body_zh"]));
 const adView = computed(() => pageOf(ads.value.map((row) => ({ ...row, where: slotWhere(row.slot) })), ["where", "title_zh", "title_en"]));
 const crawlView = computed(() => pageOf(items.value, ["title", "url"]));
-const userView = computed(() => pageOf(users.value, ["email", "role", "last_ip"]));
+const userKind = ref("member");
+const memberView = computed(() => pageOf(users.value.filter((row) => row.role !== "admin"), ["email", "role", "last_ip", "plan"]));
+const adminUserView = computed(() => pageOf(users.value.filter((row) => row.role === "admin"), ["email", "role", "last_ip"]));
 const proxyView = computed(() => pageOf(proxies.value.items || [], ["url"]));
 const sourceView = computed(() => pageOf(proxies.value.source_items || [], ["url"]));
 const levelView = computed(() => pageOf(levels.value, ["level"]));
 const alertView = computed(() => pageOf(alerts.value, ["email", "ip", "detail"]));
 const banView = computed(() => pageOf(ipBans.value, ["ip"]));
-const views = { links: linkView, structure: tabView, categories: catView, news: newsView, pages: pageView, notes: noteView, ads: adView, crawl: crawlView, users: userView, proxies: proxyView, sources: sourceView, levels: levelView, alerts: alertView, bans: banView };
-const activeView = computed(() => (views[section.value] ? views[section.value].value : { rows: [], total: 0, pages: 1, current: 1 }));
+const views = { links: linkView, structure: tabView, categories: catView, news: newsView, pages: pageView, notes: noteView, ads: adView, crawl: crawlView, proxies: proxyView, sources: sourceView, levels: levelView, alerts: alertView, bans: banView };
+const proxyKind = ref("alive");
+const activeView = computed(() => {
+  if (section.value === "proxies" && proxyKind.value === "sources") return sourceView.value;
+  if (section.value === "users") return userKind.value === "admin" ? adminUserView.value : memberView.value;
+  return views[section.value] ? views[section.value].value : { rows: [], total: 0, pages: 1, current: 1 };
+});
 function togglePick(id, on) {
   picked.value = on ? [...picked.value, id] : picked.value.filter((item) => item !== id);
 }
@@ -74,25 +116,34 @@ function togglePage(rows, on) {
 }
 const linkStats = ref({ total: 0, user: 0, system: 0 });
 const bars = computed(() => [
-  { name: tx("链接", "Links"), n: linkStats.value.total, color: "#14643f" },
-  { name: tx("资讯", "News"), n: news.value.length, color: "#1f8a56" },
-  { name: tx("用户", "Users"), n: users.value.length, color: "#c4a36a" },
-  { name: tx("广告", "Ads"), n: ads.value.length, color: "#3d6b8a" },
-  { name: tx("栏目", "Tabs"), n: tabs.value.length, color: "#8d6a32" },
+  { name: tx("链接", "Links"), n: linkStats.value.total, color: "#4c84f5" },
+  { name: tx("资讯", "News"), n: news.value.length, color: "#36cfc9" },
+  { name: tx("用户", "Users"), n: users.value.length, color: "#b7c3d0" },
+  { name: tx("广告", "Ads"), n: ads.value.length, color: "#8aa4d6" },
+  { name: tx("栏目", "Tabs"), n: tabs.value.length, color: "#d0d5dd" },
 ]);
-const barMax = computed(() => Math.max(1, ...bars.value.map((item) => item.n)));
+const barScale = computed(() => {
+  const peak = Math.max(0, ...bars.value.map((item) => item.n));
+  return peak <= 4 ? 4 : Math.ceil(peak / 4) * 4;
+});
+const barTicks = computed(() => [0, 1, 2, 3, 4].map((step) => Math.round((barScale.value / 4) * step)));
 const sourceParts = computed(() => [
-  { name: tx("系统收录", "System"), n: linkStats.value.system, color: "#14643f" },
-  { name: tx("用户提交", "Users"), n: linkStats.value.user, color: "#c4a36a" },
+  { name: tx("系统收录", "System"), n: linkStats.value.system, color: "#4c84f5" },
+  { name: tx("用户提交", "Users"), n: linkStats.value.user, color: "#f5a524" },
 ]);
 const piePaths = computed(() => {
   const parts = sourceParts.value.filter((item) => item.n > 0);
   const total = parts.reduce((sum, item) => sum + item.n, 0) || 1;
+  const minShare = parts.length > 1 ? 0.045 : 0;
+  const weights = parts.map((item) => Math.max(item.n / total, minShare));
+  const weightSum = weights.reduce((sum, item) => sum + item, 0) || 1;
   let acc = 0;
-  return parts.map((item) => {
-    const start = acc / total;
-    acc += item.n;
-    const end = acc / total;
+  return parts.map((item, index) => {
+    const share = weights[index] / weightSum;
+    const start = acc;
+    acc += share;
+    const end = index === parts.length - 1 ? 1 : acc;
+    if (share >= 0.999) return { ...item, d: "M 80 18 A 62 62 0 1 1 79.9 18 Z" };
     const a0 = start * Math.PI * 2 - Math.PI / 2;
     const a1 = end * Math.PI * 2 - Math.PI / 2;
     const x0 = 80 + Math.cos(a0) * 62;
@@ -100,10 +151,7 @@ const piePaths = computed(() => {
     const x1 = 80 + Math.cos(a1) * 62;
     const y1 = 80 + Math.sin(a1) * 62;
     const large = end - start > 0.5 ? 1 : 0;
-    const d = end - start >= 0.999
-      ? "M 80 18 A 62 62 0 1 1 79.9 18 Z"
-      : `M 80 80 L ${x0} ${y0} A 62 62 0 ${large} 1 ${x1} ${y1} Z`;
-    return { ...item, d };
+    return { ...item, d: `M 80 80 L ${x0} ${y0} A 62 62 0 ${large} 1 ${x1} ${y1} Z` };
   });
 });
 const tabs = ref([]);
@@ -212,19 +260,48 @@ async function load() {
   await loadTrend();
 }
 async function loadTrend() {
-  const { data } = await http.get("/manage/user-trend", { params: { grain: grain.value } });
-  trend.value = data;
+  const frame = emptyTrend(grain.value);
+  trend.value = frame;
+  try {
+    const { data } = await http.get("/manage/user-trend", { params: { grain: grain.value } });
+    if (data.labels?.length) trend.value = data;
+  } catch {
+    trend.value = frame;
+  }
 }
-function trendLine(values) {
-  const series = [trend.value.register, trend.value.login, trend.value.total];
-  const max = Math.max(1, ...series.flat());
-  const n = values.length || 1;
-  return values.map((value, index) => {
-    const x = 36 + (n === 1 ? 280 : (index * 560) / (n - 1));
-    const y = 24 + 120 - (value / max) * 120;
-    return `${x},${y}`;
-  }).join(" ");
-}
+const plot = computed(() => {
+  const current = trend.value.labels?.length ? trend.value : emptyTrend(grain.value);
+  const n = current.labels.length;
+  const peak = Math.max(0, ...current.register, ...current.login, ...current.total);
+  const max = peak <= 4 ? 4 : Math.ceil(peak / 4) * 4;
+  const left = 36;
+  const right = 16;
+  const top = 28;
+  const width = 668;
+  const height = 148;
+  const xAt = (index) => left + (n === 1 ? width / 2 : (index * width) / (n - 1));
+  const yAt = (value) => top + height - (Number(value) / max) * height;
+  const dots = (values) => values.map((value, index) => ({ x: xAt(index), y: yAt(value) }));
+  const line = (values) => dots(values).map((point) => `${point.x},${point.y}`).join(" ");
+  const ticks = [0, 1, 2, 3, 4].map((step) => {
+    const value = Math.round((max / 4) * step);
+    return { value, y: yAt(value) };
+  });
+  return {
+    register: line(current.register),
+    login: line(current.login),
+    total: line(current.total),
+    registerDots: dots(current.register),
+    loginDots: dots(current.login),
+    totalDots: dots(current.total),
+    labels: current.labels.map((label) => (grain.value === "month" ? label.slice(2) : label)),
+    xAt,
+    ticks,
+    base: top + height,
+    left,
+    right: left + width,
+  };
+});
 
 onMounted(async () => {
   setGate(props.gate);
@@ -272,7 +349,7 @@ function dragMove(event) {
 }
 function dragEnd() {
   dragging.value = false;
-  if (Math.abs(captchaProgress.value - captchaTarget.value) <= 4) {
+  if (Math.abs(captchaProgress.value - captchaTarget.value) <= 6) {
     captchaProgress.value = captchaTarget.value;
     matched.value = true;
   } else {
@@ -306,17 +383,31 @@ async function consoleLogin() {
 }
 
 async function setupTotp() {
-  totp.value = (await http.post("/auth/console/totp/setup")).data;
+  error.value = "";
+  try {
+    totp.value = (await http.post("/auth/console/totp/setup")).data;
+  } catch (err) {
+    error.value = err.response?.data?.detail || "failed";
+  }
 }
 
 async function confirmTotp() {
-  await http.post("/auth/console/totp/confirm", { code: code.value });
-  me.value = (await http.get("/auth/console/me")).data;
-  code.value = "";
-  totp.value = null;
+  error.value = "";
+  try {
+    await http.post("/auth/console/totp/confirm", { code: code.value });
+    me.value = (await http.get("/auth/console/me")).data;
+    code.value = "";
+    totp.value = null;
+  } catch (err) {
+    error.value = err.response?.data?.detail || "failed";
+  }
 }
 async function toggleTotp(enabled) {
   error.value = "";
+  if (!switchCode.value.trim()) {
+    error.value = "invalid code";
+    return;
+  }
   try {
     await http.post("/auth/console/totp/switch", { enabled, code: switchCode.value });
     me.value = (await http.get("/auth/console/me")).data;
@@ -395,8 +486,8 @@ function sourceLabel(source) {
 function openNew(kind) {
   const blank = {
     link: { ...linkForm.value, id: null },
-    tab: { slug: "", title_en: "", title_zh: "", kind: "links", adult: false },
-    category: { tab_id: tabs.value[0]?.id || "", slug: "", title_en: "", title_zh: "" },
+    tab: { slug: "", title_en: "", title_zh: "", kind: "links", sort: 0, visible: true, adult: false },
+    category: { tab_id: tabs.value[0]?.id || "", slug: "", title_en: "", title_zh: "", sort: 0, visible: true },
     note: { title_en: "", title_zh: "", body_en: "", body_zh: "", enabled: true },
     ad: { ...adForm.value, id: null },
     crawl: { url: "", category_id: categories.value[0]?.id || "" },
@@ -503,6 +594,10 @@ async function setPlan(user, plan) {
   await http.put(`/manage/users/${user.id}`, { plan, days: 30 });
   await load();
 }
+async function setProxy(user, payload) {
+  await http.put(`/manage/users/${user.id}`, payload);
+  await load();
+}
 </script>
 
 <template>
@@ -560,38 +655,60 @@ async function setPlan(user, plan) {
         <div class="stat-row">
           <div v-for="item in bars" :key="item.name"><b>{{ item.n }}</b><span>{{ item.name }}</span></div>
         </div>
-        <div class="trend-head">
-          <h3>{{ tx("用户趋势", "Users") }}</h3>
-          <div>
+        <div class="chart-card trend-card">
+        <h3>{{ tx("用户趋势", "Users") }}</h3>
+        <div class="trend-legend">
+          <div class="grain">
             <button type="button" :class="{ on: grain === 'day' }" @click="grain = 'day'; loadTrend()">{{ tx("天", "Day") }}</button>
             <button type="button" :class="{ on: grain === 'month' }" @click="grain = 'month'; loadTrend()">{{ tx("月", "Month") }}</button>
           </div>
+          <button type="button" :class="{ on: trendFocus === 'register', dim: trendFocus && trendFocus !== 'register' }" @click="pickTrend('register')"><i class="dot reg"></i>{{ tx("注册", "Sign-ups") }}</button>
+          <button type="button" :class="{ on: trendFocus === 'login', dim: trendFocus && trendFocus !== 'login' }" @click="pickTrend('login')"><i class="dot log"></i>{{ tx("登录", "Sign-ins") }}</button>
+          <button type="button" :class="{ on: trendFocus === 'total', dim: trendFocus && trendFocus !== 'total' }" @click="pickTrend('total')"><i class="dot tot"></i>{{ tx("总用户", "Total") }}</button>
         </div>
-        <svg viewBox="0 0 640 180" class="chart trend">
-          <polyline :points="trendLine(trend.register)" fill="none" stroke="#14643f" stroke-width="2.5" />
-          <polyline :points="trendLine(trend.login)" fill="none" stroke="#c4a36a" stroke-width="2.5" />
-          <polyline :points="trendLine(trend.total)" fill="none" stroke="#3d6b8a" stroke-width="2.5" />
-          <text v-for="(label, index) in trend.labels" :key="label + index" :x="36 + (trend.labels.length <= 1 ? 280 : (index * 560) / (trend.labels.length - 1))" y="168" text-anchor="middle" font-size="10" fill="#6b7280">{{ index % (grain === 'day' ? 2 : 1) === 0 ? label : "" }}</text>
+        <svg viewBox="0 0 720 214" class="chart trend">
+          <g v-for="tick in plot.ticks" :key="tick.value">
+            <line :x1="plot.left" :y1="tick.y" :x2="plot.right" :y2="tick.y" stroke="#eef1f4" />
+            <text :x="plot.left - 8" :y="tick.y + 4" text-anchor="end" font-size="11" fill="#98a2b3">{{ tick.value }}</text>
+          </g>
+          <polyline :points="plot.total" fill="none" stroke="#b7c3d0" :stroke-width="trendOn('total') ? 2.4 : 1.4" stroke-dasharray="4 3" stroke-linejoin="round" stroke-linecap="round" :opacity="trendOn('total') ? 1 : 0.18" />
+          <polyline :points="plot.login" fill="none" stroke="#36cfc9" :stroke-width="trendOn('login') ? 2.4 : 1.4" stroke-linejoin="round" stroke-linecap="round" :opacity="trendOn('login') ? 1 : 0.18" />
+          <polyline :points="plot.register" fill="none" stroke="#4c84f5" :stroke-width="trendOn('register') ? 2.4 : 1.4" stroke-linejoin="round" stroke-linecap="round" :opacity="trendOn('register') ? 1 : 0.18" />
+          <circle v-for="(point, index) in plot.totalDots" :key="'t' + index" :cx="point.x" :cy="point.y" r="3" fill="#fff" stroke="#b7c3d0" stroke-width="1.4" :opacity="trendOn('total') ? 1 : 0.18" />
+          <circle v-for="(point, index) in plot.loginDots" :key="'l' + index" :cx="point.x" :cy="point.y" r="3" fill="#fff" stroke="#36cfc9" stroke-width="1.4" :opacity="trendOn('login') ? 1 : 0.18" />
+          <circle v-for="(point, index) in plot.registerDots" :key="'r' + index" :cx="point.x" :cy="point.y" r="3.2" fill="#fff" stroke="#4c84f5" stroke-width="1.6" :opacity="trendOn('register') ? 1 : 0.18" />
+          <text v-for="(label, index) in plot.labels" :key="label + index" :x="plot.xAt(index)" y="198" text-anchor="middle" font-size="11" fill="#98a2b3">{{ grain === "day" && index % 2 ? "" : label }}</text>
         </svg>
-        <p><i style="background:#14643f"></i>{{ tx("注册", "Sign-ups") }} <i style="background:#c4a36a"></i>{{ tx("登录", "Sign-ins") }} <i style="background:#3d6b8a"></i>{{ tx("总用户", "Total users") }}</p>
+        </div>
         <div class="chart-row">
-          <div>
+          <div class="chart-card">
             <h3>{{ tx("数量对比", "Totals") }}</h3>
-            <svg viewBox="0 0 360 180" class="chart">
+            <svg viewBox="0 0 520 210" class="chart">
+              <g v-for="tick in barTicks" :key="tick">
+                <line x1="36" :y1="168 - (tick / barScale) * 140" x2="500" :y2="168 - (tick / barScale) * 140" stroke="#eef1f4" />
+                <text x="30" :y="172 - (tick / barScale) * 140" text-anchor="end" font-size="11" fill="#98a2b3">{{ tick }}</text>
+              </g>
               <g v-for="(item, index) in bars" :key="item.name">
-                <rect :x="28 + index * 66" :y="150 - (item.n / barMax) * 120" width="36" :height="Math.max(2, (item.n / barMax) * 120)" :fill="item.color" rx="6" />
-                <text :x="46 + index * 66" y="168" text-anchor="middle" font-size="11" fill="#5c6b62">{{ item.name }}</text>
+                <rect :x="58 + index * 90" :y="168 - (item.n / barScale) * 140" width="42" :height="Math.max(item.n ? 2 : 0, (item.n / barScale) * 140)" :fill="item.color" rx="6" />
+                <text :x="79 + index * 90" :y="160 - (item.n / barScale) * 140" text-anchor="middle" font-size="11" fill="#667085">{{ item.n }}</text>
+                <text :x="79 + index * 90" y="190" text-anchor="middle" font-size="12" fill="#667085">{{ item.name }}</text>
               </g>
             </svg>
           </div>
-          <div>
+          <div class="chart-card pie-card">
             <h3>{{ tx("链接来源", "Link sources") }}</h3>
-            <svg viewBox="0 0 160 160" class="chart pie">
-              <circle cx="80" cy="80" r="62" fill="#e7f0eb" />
-              <path v-for="item in piePaths" :key="item.name" :d="item.d" :fill="item.color" />
-              <circle cx="80" cy="80" r="34" fill="#fff" />
-            </svg>
-            <p v-for="item in sourceParts" :key="item.name"><i :style="{ background: item.color }"></i>{{ item.name }} {{ item.n }}</p>
+            <div class="pie-body">
+              <svg viewBox="0 0 160 160" class="chart pie">
+                <circle cx="80" cy="80" r="62" fill="#f2f4f7" />
+                <path v-for="item in piePaths" :key="item.name" :d="item.d" :fill="item.color" />
+                <circle cx="80" cy="80" r="36" fill="#fff" />
+                <text x="80" y="76" text-anchor="middle" font-size="13" fill="#98a2b3">{{ tx("合计", "Total") }}</text>
+                <text x="80" y="96" text-anchor="middle" font-size="18" fill="#1f2937">{{ linkStats.total }}</text>
+              </svg>
+              <div>
+                <p v-for="item in sourceParts" :key="item.name"><i :style="{ background: item.color }"></i>{{ item.name }} <b>{{ item.n }}</b></p>
+              </div>
+            </div>
           </div>
         </div>
       </section>
@@ -607,7 +724,15 @@ async function setPlan(user, plan) {
           <button v-if="section === 'notes'" class="primary" type="button" @click="openNew('note')">{{ tx("新增", "Add") }}</button>
           <button v-if="section === 'ads'" class="primary" type="button" @click="openNew('ad')">{{ tx("新增", "Add") }}</button>
           <button v-if="section === 'crawl'" class="primary" type="button" @click="openNew('crawl')">{{ tx("新增采集", "Fetch") }}</button>
-          <button v-if="section === 'users'" class="primary" type="button" @click="openNew('admin')">{{ tx("新增管理员", "Add admin") }}</button>
+          <template v-if="section === 'proxies'">
+            <button type="button" :class="{ primary: proxyKind === 'alive' }" @click="proxyKind = 'alive'; pageNo = 1">{{ tx("有效代理", "Working") }} {{ proxies.count || 0 }}</button>
+            <button type="button" :class="{ primary: proxyKind === 'sources' }" @click="proxyKind = 'sources'; pageNo = 1">{{ tx("开源代理池", "Source lists") }} {{ proxies.sources || 0 }}</button>
+          </template>
+          <template v-if="section === 'users'">
+            <button type="button" :class="{ primary: userKind === 'member' }" @click="userKind = 'member'; pageNo = 1">{{ tx("前台会员", "Members") }}</button>
+            <button type="button" :class="{ primary: userKind === 'admin' }" @click="userKind = 'admin'; pageNo = 1">{{ tx("管理员", "Admins") }}</button>
+            <button v-if="userKind === 'admin'" class="primary" type="button" @click="openNew('admin')">{{ tx("新增管理员", "Add admin") }}</button>
+          </template>
           <button v-if="section === 'alerts'" class="primary" type="button" @click="openNew('ban')">{{ tx("禁用 IP", "Block IP") }}</button>
           <template v-if="section === 'links'">
             <button type="button" :disabled="!picked.length" @click="bump('favorite_count')">{{ tx("收藏累加", "Add saves") }}</button>
@@ -621,29 +746,49 @@ async function setPlan(user, plan) {
           <span v-if="notice">{{ notice }}</span>
         </div>
         <p v-if="section === 'levels'">{{ tx("积分门槛和每分钟代理次数可以改。等级本身固定为 0 到 10。", "Point thresholds and proxy limits can be edited. Levels stay 0 to 10.") }}</p>
-        <p v-if="section === 'security' && !me.totp_bound">{{ tx("还没绑定验证器。不绑定也可以登录和编辑。", "No authenticator yet. You can still sign in and edit.") }}</p>
-        <p v-else-if="section === 'security' && me.totp_enabled">{{ tx("两步验证已打开。下次登录需要验证码。", "Two-factor is on. The next sign-in needs a code.") }}</p>
-        <p v-else-if="section === 'security'">{{ tx("已绑定，但开关是关的。登录不需要验证码。", "Bound, and the switch is off. Sign-in does not need a code.") }}</p>
-
-        <div v-if="section === 'security'" class="security-box">
-          <template v-if="!me.totp_bound">
-            <button class="primary" type="button" @click="setupTotp">{{ tx("生成密钥", "Generate key") }}</button>
-            <p v-if="totp">{{ totp.secret }}</p>
-            <input v-model="code" :placeholder="tx('6 位验证码', '6-digit code')" />
-            <button class="primary" type="button" @click="confirmTotp">{{ tx("确认绑定", "Confirm") }}</button>
-          </template>
-          <template v-else>
-            <label><input :key="String(me.totp_enabled)" type="checkbox" :checked="me.totp_enabled" @change="toggleTotp($event.target.checked)" /> {{ tx("登录时要求验证码", "Require a code at sign-in") }}</label>
-            <input v-if="!me.totp_enabled" v-model="switchCode" :placeholder="tx('打开开关前填写当前验证码', 'Enter the current code before turning this on')" />
-          </template>
-          <h3>{{ tx("修改我的密码", "Change my password") }}</h3>
-          <input v-model="ownPass.current_password" type="password" :placeholder="tx('当前密码', 'Current password')" />
-          <input v-model="ownPass.new_password" type="password" :placeholder="tx('新密码至少 8 位', 'New password, at least 8 characters')" />
-          <button type="button" @click="changeOwnPassword">{{ tx("保存密码", "Save password") }}</button>
-          <label>{{ tx("每个有效链接的积分", "Points per accepted link") }}</label>
-          <input v-model.number="pointsPerLink" type="number" min="1" />
-          <button type="button" @click="savePointRule">{{ tx("保存积分规则", "Save point rule") }}</button>
-          <p v-if="error">{{ error }}</p>
+        <p v-if="section === 'proxies'">{{ proxies.note || tx("每 3 分钟检测一次，打不开的代理会删掉。", "Checked every 3 minutes. Unusable proxies are removed.") }}</p>
+        <div v-if="section === 'security'" class="security-page">
+          <article class="security-card">
+            <header>
+              <h3>{{ tx("验证器", "Authenticator") }}</h3>
+              <span class="pill" :class="{ on: me.totp_enabled }">{{ me.totp_enabled ? tx("登录需要验证码", "Required at sign-in") : me.totp_bound ? tx("已绑定", "Bound") : tx("未绑定", "Not bound") }}</span>
+            </header>
+            <p>{{ tx("用手机验证器扫码绑定。不绑定也可以登录；绑定后可以打开登录验证。", "Scan with a phone authenticator. Sign-in still works without it. After binding, you can require a code.") }}</p>
+            <template v-if="totp">
+              <div class="qr" v-html="totp.svg"></div>
+              <p class="secret">{{ totp.secret }}</p>
+              <div class="bind-row">
+                <input v-model="code" inputmode="numeric" maxlength="6" :placeholder="tx('App 里的 6 位验证码', '6-digit code from the app')" />
+                <button class="primary" type="button" @click="confirmTotp">{{ tx("完成绑定", "Finish") }}</button>
+              </div>
+            </template>
+            <template v-else-if="!me.totp_bound">
+              <button class="primary" type="button" @click="setupTotp">{{ tx("扫码绑定", "Scan to bind") }}</button>
+            </template>
+            <template v-else>
+              <input v-model="switchCode" inputmode="numeric" maxlength="6" :placeholder="tx('先填 6 位验证码，再拨开关', 'Enter the 6-digit code, then use the switch')" />
+              <label class="switch" :class="{ locked: switchCode.trim().length < 6 }">
+                <input :key="String(me.totp_enabled) + error" type="checkbox" :checked="me.totp_enabled" :disabled="switchCode.trim().length < 6" @change="toggleTotp($event.target.checked)" />
+                <i></i>
+                <span>{{ tx("登录时要求验证码", "Require a code at sign-in") }}</span>
+              </label>
+              <button type="button" @click="setupTotp">{{ tx("重新扫码绑定", "Scan again") }}</button>
+            </template>
+          </article>
+          <article class="security-card">
+            <header><h3>{{ tx("登录密码", "Password") }}</h3></header>
+            <p>{{ tx("修改当前管理员的登录密码。", "Change the password for this admin account.") }}</p>
+            <input v-model="ownPass.current_password" type="password" :placeholder="tx('当前密码', 'Current password')" />
+            <input v-model="ownPass.new_password" type="password" :placeholder="tx('新密码至少 8 位', 'New password, at least 8 characters')" />
+            <button class="primary" type="button" @click="changeOwnPassword">{{ tx("保存密码", "Save password") }}</button>
+          </article>
+          <article class="security-card">
+            <header><h3>{{ tx("投稿积分", "Submission points") }}</h3></header>
+            <p>{{ tx("前台用户每提交一个通过审核的链接，获得这么多积分。", "Members receive this many points for each accepted link.") }}</p>
+            <input v-model.number="pointsPerLink" type="number" min="1" />
+            <button class="primary" type="button" @click="savePointRule">{{ tx("保存积分规则", "Save point rule") }}</button>
+          </article>
+          <p v-if="error" class="security-error">{{ error === "invalid code" ? tx("验证码不正确，还没有绑定成功。", "That code is not valid, so nothing was changed.") : error }}</p>
         </div>
 
         <div v-else class="table-scroll">
@@ -655,10 +800,10 @@ async function setPlan(user, plan) {
                   <th>{{ tx("名称", "Name") }}</th><th>{{ tx("地址", "URL") }}</th><th>{{ tx("来源", "Source") }}</th><th>{{ tx("收藏", "Saves") }}</th><th>{{ tx("推荐", "Picks") }}</th><th>{{ tx("点击", "Clicks") }}</th>
                 </template>
                 <template v-else-if="section === 'structure'">
-                  <th>ID</th><th>{{ tx("名称", "Name") }}</th><th>slug</th>
+                  <th>ID</th><th>slug</th><th>{{ tx("中文名", "Chinese") }}</th><th>{{ tx("英文名", "English") }}</th><th>{{ tx("类型", "Kind") }}</th><th>{{ tx("排序", "Sort") }}</th><th>{{ tx("显示", "Visible") }}</th><th>18+</th>
                 </template>
                 <template v-else-if="section === 'categories'">
-                  <th>{{ tx("栏目", "Tab") }}</th><th>{{ tx("名称", "Name") }}</th><th>slug</th>
+                  <th>ID</th><th>{{ tx("栏目", "Tab") }}</th><th>slug</th><th>{{ tx("中文名", "Chinese") }}</th><th>{{ tx("英文名", "English") }}</th><th>{{ tx("排序", "Sort") }}</th><th>{{ tx("显示", "Visible") }}</th>
                 </template>
                 <template v-else-if="section === 'news'">
                   <th>{{ tx("分类", "Topic") }}</th><th>{{ tx("标题", "Title") }}</th><th>{{ tx("来源", "Source") }}</th>
@@ -675,8 +820,14 @@ async function setPlan(user, plan) {
                 <template v-else-if="section === 'crawl'">
                   <th>{{ tx("标题", "Title") }}</th><th>{{ tx("地址", "URL") }}</th>
                 </template>
+                <template v-else-if="section === 'users' && userKind === 'admin'">
+                  <th>{{ tx("邮箱", "Email") }}</th><th>{{ tx("验证器", "Authenticator") }}</th><th>IP</th>
+                </template>
                 <template v-else-if="section === 'users'">
-                  <th>{{ tx("邮箱", "Email") }}</th><th>{{ tx("角色", "Role") }}</th><th>IP</th>
+                  <th>{{ tx("邮箱", "Email") }}</th><th>{{ tx("昵称", "Name") }}</th><th>{{ tx("会员", "Plan") }}</th><th>{{ tx("等级", "Level") }}</th><th>{{ tx("代理", "Proxy") }}</th><th>IP</th><th>{{ tx("注册", "Joined") }}</th>
+                </template>
+                <template v-else-if="section === 'proxies' && proxyKind === 'sources'">
+                  <th>{{ tx("开源列表", "Source list") }}</th>
                 </template>
                 <template v-else-if="section === 'proxies'">
                   <th>{{ tx("代理", "Proxy") }}</th><th>{{ tx("检测时间", "Checked") }}</th>
@@ -698,11 +849,11 @@ async function setPlan(user, plan) {
                   <td class="row-actions"><button type="button" @click="openEdit('link', row)">{{ tx("编辑", "Edit") }}</button><button type="button" @click="removeIds('/manage/links', [row.id])">{{ tx("删除", "Delete") }}</button></td>
                 </template>
                 <template v-else-if="section === 'structure'">
-                  <td>{{ row.id }}</td><td>{{ row.title_zh || row.title_en }}</td><td>{{ row.slug }}</td>
+                  <td>{{ row.id }}</td><td>{{ row.slug }}</td><td>{{ row.title_zh }}</td><td>{{ row.title_en }}</td><td>{{ row.kind }}</td><td>{{ row.sort }}</td><td>{{ row.visible ? tx("是", "Yes") : tx("否", "No") }}</td><td>{{ row.adult ? tx("是", "Yes") : tx("否", "No") }}</td>
                   <td class="row-actions"><button type="button" @click="openEdit('tab', row)">{{ tx("编辑", "Edit") }}</button><button type="button" @click="removeIds('/manage/tabs', [row.id])">{{ tx("删除", "Delete") }}</button></td>
                 </template>
                 <template v-else-if="section === 'categories'">
-                  <td>{{ row.tab_id }}</td><td>{{ row.title_zh || row.title_en }}</td><td>{{ row.slug }}</td>
+                  <td>{{ row.id }}</td><td>{{ row.tab_id }}</td><td>{{ row.slug }}</td><td>{{ row.title_zh }}</td><td>{{ row.title_en }}</td><td>{{ row.sort }}</td><td>{{ row.visible ? tx("是", "Yes") : tx("否", "No") }}</td>
                   <td class="row-actions"><button type="button" @click="openEdit('category', row)">{{ tx("编辑", "Edit") }}</button><button type="button" @click="removeIds('/manage/categories', [row.id])">{{ tx("删除", "Delete") }}</button></td>
                 </template>
                 <template v-else-if="section === 'news'">
@@ -725,15 +876,37 @@ async function setPlan(user, plan) {
                   <td>{{ row.title }}</td><td class="clip">{{ row.url }}</td>
                   <td class="row-actions"><button type="button" @click="approve(row.id)">{{ tx("收录", "Approve") }}</button></td>
                 </template>
-                <template v-else-if="section === 'users'">
-                  <td>{{ row.email }}</td><td>{{ row.role }}</td><td>{{ row.banned ? tx("已禁用", "Disabled") : row.last_ip }}</td>
+                <template v-else-if="section === 'users' && userKind === 'admin'">
+                  <td>{{ row.email }}</td><td>{{ row.totp_enabled ? tx("已开启", "On") : tx("未开启", "Off") }}</td><td>{{ row.banned ? tx("已禁用", "Disabled") : row.last_ip }}</td>
                   <td class="row-actions">
-                    <button type="button" @click="setPlan(row, 'vip')">VIP</button>
-                    <button type="button" @click="setPlan(row, 'free')">Free</button>
                     <button type="button" @click="resetPassword(row)">{{ tx("重置密码", "Reset password") }}</button>
-                    <button type="button" @click="resetTotp(row)">{{ tx("重置验证器", "Reset 2FA") }}</button>
+                    <button type="button" @click="resetTotp(row)">{{ tx("重置验证器", "Reset authenticator") }}</button>
                     <button type="button" @click="banUser(row)">{{ row.banned ? tx("解封", "Enable") : tx("禁用", "Disable") }}</button>
                   </td>
+                </template>
+                <template v-else-if="section === 'users'">
+                  <td>{{ row.email }}</td>
+                  <td>{{ row.display_name || "—" }}</td>
+                  <td>{{ row.plan === "vip" ? "VIP" : tx("免费", "Free") }}</td>
+                  <td>Lv.{{ row.level }} · {{ row.points }}</td>
+                  <td>
+                    <div class="proxy-edit">
+                      <button type="button" :class="{ primary: row.proxy_unlimited }" @click="setProxy(row, { proxy_unlimited: !row.proxy_unlimited })">{{ row.proxy_unlimited ? tx("取消白名单", "Limited") : tx("设白名单", "Unlimited") }}</button>
+                      <input v-model="row.proxy_limit" type="number" min="0" :placeholder="tx('次数', 'Limit')" />
+                      <button type="button" @click="setProxy(row, { proxy_limit: row.proxy_limit === '' || row.proxy_limit == null ? null : Number(row.proxy_limit) })">{{ tx("保存", "Save") }}</button>
+                    </div>
+                  </td>
+                  <td>{{ row.banned ? tx("已禁用", "Disabled") : (row.last_ip || "—") }}</td>
+                  <td>{{ (row.created_at || "").slice(0, 10) }}</td>
+                  <td class="row-actions">
+                    <button type="button" @click="setPlan(row, row.plan === 'vip' ? 'free' : 'vip')">{{ row.plan === "vip" ? tx("改免费", "Make free") : tx("改 VIP", "Make VIP") }}</button>
+                    <button type="button" @click="resetPassword(row)">{{ tx("重置密码", "Reset password") }}</button>
+                    <button type="button" @click="banUser(row)">{{ row.banned ? tx("解封", "Enable") : tx("禁用", "Disable") }}</button>
+                  </td>
+                </template>
+                <template v-else-if="section === 'proxies' && proxyKind === 'sources'">
+                  <td class="clip">{{ row.url }}</td>
+                  <td class="row-actions"><button type="button" @click="dropSource(row.url)">{{ tx("删除", "Delete") }}</button></td>
                 </template>
                 <template v-else-if="section === 'proxies'">
                   <td class="clip">{{ row.url }}</td><td>{{ row.checked_at }}</td>
@@ -754,10 +927,20 @@ async function setPlan(user, plan) {
             </tbody>
           </table>
         </div>
-        <div v-if="section !== 'security'" class="pager">
-          <button type="button" :disabled="pageNo <= 1" @click="pageNo--">{{ tx("上一页", "Prev") }}</button>
-          <span>{{ Math.min(pageNo, activeView.pages) }} / {{ activeView.pages }} · {{ activeView.total }}</span>
-          <button type="button" :disabled="pageNo >= activeView.pages" @click="pageNo++">{{ tx("下一页", "Next") }}</button>
+        <div v-if="section !== 'security'" class="console-pager">
+          <span class="pager-total">{{ tx(`共 ${activeView.total} 条`, `${activeView.total} total`) }}</span>
+          <button type="button" :disabled="activeView.current <= 1" @click="goPage(activeView.current - 1)">‹</button>
+          <button type="button" class="is-current">{{ activeView.current }}</button>
+          <button type="button" :disabled="activeView.current >= activeView.pages" @click="goPage(activeView.current + 1)">›</button>
+          <select v-model.number="pageSize" @change="changePageSize">
+            <option :value="10">{{ tx("10条/页", "10 / page") }}</option>
+            <option :value="20">{{ tx("20条/页", "20 / page") }}</option>
+            <option :value="50">{{ tx("50条/页", "50 / page") }}</option>
+            <option :value="100">{{ tx("100条/页", "100 / page") }}</option>
+          </select>
+          <span>{{ tx("前往", "Go to") }}</span>
+          <input v-model.number="jumpNo" type="number" min="1" :max="activeView.pages" @keyup.enter="goPage(jumpNo)" @change="goPage(jumpNo)" />
+          <span>{{ tx("页", "") }}</span>
         </div>
       </section>
 
@@ -776,15 +959,23 @@ async function setPlan(user, plan) {
           </template>
           <template v-else-if="editor.kind === 'tab'">
             <input v-model="editor.row.slug" placeholder="slug" required />
-            <input v-model="editor.row.title_zh" :placeholder="tx('中文栏目', 'Chinese tab')" />
-            <input v-model="editor.row.title_en" :placeholder="tx('英文栏目', 'English tab')" />
+            <input v-model="editor.row.title_zh" :placeholder="tx('中文名', 'Chinese name')" />
+            <input v-model="editor.row.title_en" :placeholder="tx('英文名', 'English name')" />
+            <select v-model="editor.row.kind">
+              <option value="links">links</option>
+              <option value="home">home</option>
+            </select>
+            <input v-model.number="editor.row.sort" type="number" :placeholder="tx('排序，数字越大越靠前', 'Sort, larger numbers come first')" />
+            <label><input type="checkbox" v-model="editor.row.visible" /> {{ tx("显示", "Visible") }}</label>
             <label><input type="checkbox" v-model="editor.row.adult" /> 18+</label>
           </template>
           <template v-else-if="editor.kind === 'category'">
             <select v-model="editor.row.tab_id"><option v-for="tab in tabs" :key="tab.id" :value="tab.id">{{ tab.title_zh || tab.title_en }}</option></select>
             <input v-model="editor.row.slug" placeholder="slug" required />
-            <input v-model="editor.row.title_zh" :placeholder="tx('中文分类', 'Chinese category')" />
-            <input v-model="editor.row.title_en" :placeholder="tx('英文分类', 'English category')" />
+            <input v-model="editor.row.title_zh" :placeholder="tx('中文名', 'Chinese name')" />
+            <input v-model="editor.row.title_en" :placeholder="tx('英文名', 'English name')" />
+            <input v-model.number="editor.row.sort" type="number" :placeholder="tx('排序，数字越大越靠前', 'Sort, larger numbers come first')" />
+            <label><input type="checkbox" v-model="editor.row.visible" /> {{ tx("显示", "Visible") }}</label>
           </template>
           <template v-else-if="editor.kind === 'page'">
             <input v-model="editor.row.title_zh" />

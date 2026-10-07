@@ -1,3 +1,4 @@
+import json
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -39,7 +40,7 @@ def guard(response: Response):
 
 @router.get("/tree")
 def tree(locale: str = "en", db: Session = Depends(db_session)):
-    tabs = db.scalars(select(Tab).where(Tab.visible.is_(True)).order_by(Tab.sort, Tab.id)).all()
+    tabs = db.scalars(select(Tab).where(Tab.visible.is_(True)).order_by(Tab.sort.desc(), Tab.id)).all()
     payload = []
     for tab in tabs:
         categories = db.scalars(
@@ -163,14 +164,18 @@ def announcements(locale: str = "en", db: Session = Depends(db_session)):
 def news(db: Session = Depends(db_session)):
     from fetch_news import today_start
 
-    categories = db.scalars(select(NewsItem.category).where(NewsItem.published_at >= today_start()).distinct()).all()
-    rows = []
-    for category in categories:
-        rows.extend(
-            db.scalars(
-                select(NewsItem).where(NewsItem.category == category, NewsItem.published_at >= today_start()).order_by(NewsItem.published_at.desc(), NewsItem.id.desc()).limit(8)
-            ).all()
-        )
+    rows = db.scalars(
+        select(NewsItem).where(NewsItem.published_at >= today_start()).order_by(NewsItem.published_at.desc(), NewsItem.id.desc())
+    ).all()
+    kept = {}
+    picked = []
+    for row in rows:
+        category = row.category or "news"
+        if kept.get(category, 0) >= 8:
+            continue
+        kept[category] = kept.get(category, 0) + 1
+        picked.append(row)
+    rows = picked
     return [
         {
             "id": row.id,
@@ -187,10 +192,21 @@ def news(db: Session = Depends(db_session)):
 
 @router.get("/board")
 def board(tab_id: int, locale: str = "en", db: Session = Depends(db_session)):
-    categories = db.scalars(select(Category).where(Category.tab_id == tab_id, Category.visible.is_(True)).order_by(Category.sort, Category.id)).all()
+    cache_key = f"board:{tab_id}:{locale}"
+    cached = rds.get(cache_key)
+    if cached:
+        return json.loads(cached)
+    categories = db.scalars(select(Category).where(Category.tab_id == tab_id, Category.visible.is_(True)).order_by(Category.sort.desc(), Category.id)).all()
+    grouped = {category.id: [] for category in categories}
+    if grouped:
+        rows = db.scalars(
+            select(Link).where(Link.category_id.in_(grouped), Link.status == "published").order_by(Link.sort, Link.id.desc())
+        ).all()
+        for row in rows:
+            grouped[row.category_id].append(row)
     payload = []
     for category in categories:
-        rows = db.scalars(select(Link).where(Link.category_id == category.id, Link.status == "published").order_by(Link.sort, Link.id.desc())).all()
+        rows = grouped[category.id]
         payload.append(
             {
                 "id": category.id,
@@ -211,6 +227,7 @@ def board(tab_id: int, locale: str = "en", db: Session = Depends(db_session)):
                 ],
             }
         )
+    rds.setex(cache_key, 45, json.dumps(payload, ensure_ascii=False))
     return payload
 
 
@@ -233,6 +250,8 @@ def my_level(user: User = Depends(require_user), db: Session = Depends(db_sessio
         "points": user.points or 0,
         "level": row.level,
         "proxy_per_minute": row.proxy_per_minute,
+        "proxy_unlimited": bool(user.proxy_unlimited),
+        "proxy_limit": user.proxy_limit,
         "next_points": next_points(db, row),
         "points_per_link": per_link,
         "levels": [{"level": item.level, "min_points": item.min_points, "proxy_per_minute": item.proxy_per_minute} for item in ladder],
@@ -340,10 +359,12 @@ def acquire_proxy(token: str = Query(default=""), authorization: str | None = He
         token = authorization.split(" ", 1)[1].strip()
     user = db.scalar(select(User).where(User.proxy_token == token)) if token else None
     if not user:
-        raise HTTPException(status_code=401, detail="proxy token required")
-    level = user_level(db, user)
-    if not rate_limit(f"proxy:{user.id}", level.proxy_per_minute, 60):
-        raise HTTPException(status_code=429, detail="too many requests")
+        raise HTTPException(status_code=401, detail="proxy token required" if not token else "proxy token invalid")
+    if not user.proxy_unlimited:
+        level = user_level(db, user)
+        limit = user.proxy_limit if user.proxy_limit is not None else level.proxy_per_minute
+        if not rate_limit(f"proxy:{user.id}", max(0, limit), 60):
+            raise HTTPException(status_code=429, detail="too many requests")
     base = (settings.proxy_pool_url or "").rstrip("/")
     if not base:
         return {"proxy": None}
@@ -353,6 +374,29 @@ def acquire_proxy(token: str = Query(default=""), authorization: str | None = He
         return {"proxy": response.json().get("proxy")}
     except httpx.HTTPError:
         return {"proxy": None}
+
+
+@router.get("/home")
+def home(locale: str = "en", db: Session = Depends(db_session)):
+    from app.github_ranks import load_ranks
+
+    cache_key = f"home:{locale}"
+    cached = rds.get(cache_key)
+    if cached:
+        return json.loads(cached)
+    payload = {
+        "tree": tree(locale, db),
+        "announcements": announcements(locale, db),
+        "news": news(db),
+        "ads": ads(locale=locale, db=db),
+        "ranks": ranks(locale, db),
+        "github": {
+            "growth": load_ranks("past_24_hours"),
+            "total": load_ranks("total"),
+        },
+    }
+    rds.setex(cache_key, 45, json.dumps(payload, ensure_ascii=False))
+    return payload
 
 
 @router.get("/github")

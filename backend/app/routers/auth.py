@@ -21,6 +21,8 @@ from app.security import (
     rate_limit,
     read_session,
     record_failure,
+    rds,
+    totp_qr,
     totp_uri,
     verify_password,
     issue_captcha,
@@ -76,8 +78,15 @@ def _email(value: str) -> str:
     return value.strip().lower()
 
 
+def _ip(request: Request) -> str:
+    forwarded = request.headers.get("x-forwarded-for", "")
+    if forwarded:
+        return forwarded.split(",")[0].strip()[:64]
+    return (request.client.host if request.client else "")[:64]
+
+
 @router.post("/register")
-def register(body: Creds, response: Response, db: Session = Depends(db_session)):
+def register(body: Creds, request: Request, response: Response, db: Session = Depends(db_session)):
     if not take_captcha(body.captcha_id, body.captcha_progress):
         raise HTTPException(status_code=400, detail="captcha required")
     email = _email(body.email)
@@ -85,7 +94,7 @@ def register(body: Creds, response: Response, db: Session = Depends(db_session))
         raise HTTPException(status_code=429, detail="too many requests")
     if db.scalar(select(User).where(User.email == email)):
         raise HTTPException(status_code=400, detail="email exists")
-    user = User(email=email, password_hash=hash_password(body.password))
+    user = User(email=email, password_hash=hash_password(body.password), last_ip=_ip(request))
     db.add(user)
     try:
         db.commit()
@@ -109,7 +118,7 @@ def login(body: Creds, request: Request, response: Response, db: Session = Depen
     if not user or not verify_password(body.password, user.password_hash):
         record_failure(email)
         raise HTTPException(status_code=401, detail="invalid credentials")
-    ip = (request.client.host if request.client else "")[:64]
+    ip = _ip(request)
     if user.banned or (ip and db.scalar(select(IpBan.id).where(IpBan.ip == ip))):
         raise HTTPException(status_code=403, detail="banned")
     user.last_ip = ip
@@ -144,7 +153,7 @@ def console_login(body: Creds, request: Request, response: Response, db: Session
     if user.totp_enabled and not check_totp(user.totp_secret, body.totp):
         record_failure(email)
         raise HTTPException(status_code=401, detail="totp required")
-    ip = (request.client.host if request.client else "")[:64]
+    ip = _ip(request)
     if user.banned or (ip and db.scalar(select(IpBan.id).where(IpBan.ip == ip))):
         raise HTTPException(status_code=403, detail="banned")
     user.last_ip = ip
@@ -178,7 +187,7 @@ def console_me(db: Session = Depends(db_session), nav_console: str | None = Cook
         "display_name": user.display_name,
         "role": user.role,
         "totp_enabled": user.totp_enabled,
-        "totp_bound": bool(user.totp_secret),
+        "totp_bound": bool(user.totp_confirmed),
         "totp_ok": data.get("totp_ok", False),
     }
 
@@ -198,8 +207,12 @@ def logout(response: Response, nav_session: str | None = Cookie(default=None)):
 
 
 @router.get("/me")
-def me(user: User = Depends(require_user), nav_session: str | None = Cookie(default=None)):
+def me(request: Request, user: User = Depends(require_user), db: Session = Depends(db_session), nav_session: str | None = Cookie(default=None)):
     data = read_session(nav_session) or {}
+    ip = _ip(request)
+    if ip and ip != user.last_ip:
+        user.last_ip = ip
+        db.commit()
     return {
         "id": user.id,
         "email": user.email,
@@ -207,8 +220,12 @@ def me(user: User = Depends(require_user), nav_session: str | None = Cookie(defa
         "role": user.role,
         "plan": plan_active(user),
         "plan_expires_at": user.plan_expires_at.isoformat() if user.plan_expires_at else None,
+        "points": user.points or 0,
+        "last_ip": user.last_ip or "",
+        "proxy_unlimited": bool(user.proxy_unlimited),
+        "proxy_limit": user.proxy_limit,
         "totp_enabled": user.totp_enabled,
-        "totp_bound": bool(user.totp_secret),
+        "totp_bound": bool(user.totp_confirmed),
         "totp_ok": data.get("totp_ok", False),
     }
 
@@ -257,14 +274,17 @@ class TotpSwitch(BaseModel):
     code: str = ""
 
 
+def _pending_key(user_id: int) -> str:
+    return f"totp_pending:{user_id}"
+
+
 @router.post("/console/totp/setup")
 def console_totp_setup(db: Session = Depends(db_session), nav_console: str | None = Cookie(default=None)):
     user, _data = _console_actor(db, nav_console)
     secret = new_totp_secret()
-    user.totp_secret = secret
-    user.totp_enabled = False
-    db.commit()
-    return {"secret": secret, "uri": totp_uri(secret, user.email)}
+    rds.setex(_pending_key(user.id), 600, secret)
+    uri = totp_uri(secret, user.email)
+    return {"secret": secret, "uri": uri, "svg": totp_qr(uri)}
 
 
 @router.post("/console/totp/confirm")
@@ -274,10 +294,14 @@ def console_totp_confirm(
     nav_console: str | None = Cookie(default=None),
 ):
     user, _data = _console_actor(db, nav_console)
-    if not check_totp(user.totp_secret, body.code):
+    secret = rds.get(_pending_key(user.id)) or ""
+    if not secret or not check_totp(secret, body.code):
         raise HTTPException(status_code=400, detail="invalid code")
+    user.totp_secret = secret
+    user.totp_confirmed = True
     user.totp_enabled = True
     db.commit()
+    rds.delete(_pending_key(user.id))
     mark_totp(nav_console or "")
     return {"ok": True}
 
@@ -289,16 +313,13 @@ def console_totp_switch(
     nav_console: str | None = Cookie(default=None),
 ):
     user, _data = _console_actor(db, nav_console)
-    if body.enabled:
-        if not user.totp_secret or not check_totp(user.totp_secret, body.code):
-            raise HTTPException(status_code=400, detail="invalid code")
-        user.totp_enabled = True
-        db.commit()
+    if not user.totp_confirmed or not check_totp(user.totp_secret, body.code):
+        raise HTTPException(status_code=400, detail="invalid code")
+    user.totp_enabled = bool(body.enabled)
+    db.commit()
+    if user.totp_enabled:
         mark_totp(nav_console or "")
-    else:
-        user.totp_enabled = False
-        db.commit()
-    return {"totp_enabled": user.totp_enabled, "totp_bound": bool(user.totp_secret)}
+    return {"totp_enabled": user.totp_enabled, "totp_bound": True}
 
 
 @router.post("/totp/setup")

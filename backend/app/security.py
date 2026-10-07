@@ -72,7 +72,13 @@ def new_totp_secret() -> str:
 
 
 def totp_uri(secret: str, email: str) -> str:
-    return pyotp.TOTP(secret).provisioning_uri(name=email, issuer_name="Nav")
+    return pyotp.TOTP(secret).provisioning_uri(name=email, issuer_name="NEXA")
+
+
+def totp_qr(uri: str) -> str:
+    import segno
+
+    return segno.make(uri, error="m").svg_inline(scale=4, border=2, dark="#111827", light="#ffffff")
 
 
 def check_totp(secret: str, code: str) -> bool:
@@ -150,7 +156,7 @@ def take_match(token: str, progress: int) -> bool:
         elapsed = time.time() - float(started)
     except ValueError:
         return False
-    return 0.35 <= elapsed <= 120 and abs(int(progress) - int(target)) <= 4
+    return 0.05 <= elapsed <= 120 and abs(int(progress) - int(target)) <= 6
 
 
 def clear_failure(email: str) -> None:

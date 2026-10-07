@@ -4,6 +4,7 @@ from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 
 from app.security import rate_limit, rds
 
@@ -26,6 +27,14 @@ async def lifespan(_app: FastAPI):
             pass
         try:
             conn.execute(text("ALTER TABLE users ADD COLUMN proxy_token VARCHAR(80) NOT NULL DEFAULT ''"))
+        except Exception:
+            pass
+        try:
+            conn.execute(text("ALTER TABLE users ADD COLUMN proxy_unlimited TINYINT(1) NOT NULL DEFAULT 0"))
+        except Exception:
+            pass
+        try:
+            conn.execute(text("ALTER TABLE users ADD COLUMN proxy_limit INT NULL"))
         except Exception:
             pass
         try:
@@ -80,7 +89,25 @@ async def lifespan(_app: FastAPI):
             conn.execute(text("ALTER TABLE links ADD COLUMN points_awarded TINYINT(1) NOT NULL DEFAULT 0"))
         except Exception:
             pass
+        try:
+            conn.execute(text("ALTER TABLE users ADD COLUMN totp_confirmed TINYINT(1) NOT NULL DEFAULT 0"))
+        except Exception:
+            pass
+        for statement in (
+            "CREATE INDEX ix_news_pub ON news_items (published_at, category, id)",
+            "CREATE INDEX ix_links_cat ON links (category_id, status, sort, id)",
+            "CREATE INDEX ix_links_fav ON links (status, favorite_count)",
+            "CREATE INDEX ix_links_rec ON links (status, recommend_count)",
+            "CREATE INDEX ix_links_clk ON links (status, click_count)",
+        ):
+            try:
+                conn.execute(text(statement))
+            except Exception:
+                pass
         conn.execute(text("UPDATE users SET email = LOWER(TRIM(email))"))
+    with engine.begin() as conn:
+        conn.execute(text("UPDATE users SET totp_confirmed = 1 WHERE totp_enabled = 1"))
+        conn.execute(text("UPDATE users SET totp_secret = '' WHERE totp_confirmed = 0"))
     db = SessionLocal()
     try:
         gate = seed(db)
@@ -97,6 +124,7 @@ async def lifespan(_app: FastAPI):
 
 
 app = FastAPI(title="Nav API", lifespan=lifespan)
+app.add_middleware(GZipMiddleware, minimum_size=800)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[item.strip() for item in settings.cors_origins.split(",") if item.strip()],

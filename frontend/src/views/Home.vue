@@ -393,6 +393,25 @@ function searchWord(word) {
 }
 
 watch(tabId, loadBoard);
+function applyHome(data) {
+  tabs.value = data.tree || [];
+  if (!tabs.value.find((item) => item.id === tabId.value)) {
+    tabId.value = tabs.value.find((item) => item.kind === "home")?.id || tabs.value[0]?.id || null;
+  }
+  notes.value = data.announcements || [];
+  news.value = data.news || [];
+  ads.value = data.ads || [];
+  siteBoards.value = data.ranks || { favorites: [], recommends: [], clicks: [] };
+  growthRanks.value = data.github?.growth || [];
+  totalRanks.value = data.github?.total || [];
+  period.value = "past_24_hours";
+}
+
+async function loadHome() {
+  const { data } = await http.get("/home", { params: { locale: locale.value } });
+  applyHome(data);
+}
+
 watch(locale, async () => {
   const title = locale.value === "zh" ? "NEXA — 工具、资讯与排行" : "NEXA — AI tools, news, and rankings";
   const description = locale.value === "zh"
@@ -403,33 +422,25 @@ watch(locale, async () => {
   document.querySelector('meta[name="description"]')?.setAttribute("content", description);
   document.querySelector('meta[property="og:title"]')?.setAttribute("content", title);
   document.querySelector('meta[property="og:description"]')?.setAttribute("content", description);
-  await loadTree();
-  await loadBoard();
-  await loadSiteBoards();
+  await loadHome();
+  if (!isHome.value) await loadBoard();
 });
 
 onMounted(async () => {
   document.title = locale.value === "zh" ? "NEXA — 工具、资讯与排行" : "NEXA — AI tools, news, and rankings";
-  const [tree, noteRes, newsRes, contactRes, me, adRes] = await Promise.allSettled([
-    http.get("/tree", { params: { locale: locale.value } }),
-    http.get("/announcements", { params: { locale: locale.value } }),
-    http.get("/news"),
-    http.get("/pages/contact", { params: { locale: locale.value } }),
-    http.get("/auth/me"),
-    http.get("/ads", { params: { locale: locale.value } }),
-  ]);
-  if (tree.status === "fulfilled") {
-    tabs.value = tree.value.data;
-    tabId.value = tabs.value.find((item) => item.kind === "home")?.id || tabs.value[0]?.id || null;
+  const home = http.get("/home", { params: { locale: locale.value } });
+  http.get("/pages/contact", { params: { locale: locale.value } }).then((res) => {
+    contact.value = res.data;
+  }).catch(() => {});
+  http.get("/auth/me").then((res) => {
+    user.value = res.data;
+    loadMine();
+  }).catch(() => {});
+  try {
+    applyHome((await home).data);
+  } catch {
+    /* keep the shell usable if the bundle fails */
   }
-  if (noteRes.status === "fulfilled") notes.value = noteRes.value.data;
-  if (newsRes.status === "fulfilled") news.value = newsRes.value.data;
-  loadSiteBoards();
-  if (contactRes.status === "fulfilled") contact.value = contactRes.value.data;
-  if (me.status === "fulfilled") user.value = me.value.data;
-  loadMine();
-  if (adRes.status === "fulfilled") ads.value = adRes.value.data;
-  loadRanks("past_24_hours");
   if (route.query.link) {
     await focusHit({
       id: Number(route.query.link),
