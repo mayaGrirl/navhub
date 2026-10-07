@@ -18,7 +18,7 @@
 - 站内搜索在顶栏和页脚，点结果会定位到站内卡片。顶栏还有一组外站搜索引擎，默认 Google。界面是中文时 Google 用中文结果，英文时用英文结果。
 - 首页底部栏固定显示，可以关掉。关掉后这次浏览不再出现，刷新会再出现。
 - 公开接口要先拿到浏览凭证。代理池令牌接口不走这道限制。
-- 管理后台是随机路径，并且要先完成验证器。未登录或不是管理员访问该地址会看到 404。链接会标出是系统收录还是用户提交。
+- 管理后台是随机路径。未登录或不是管理员访问该地址会看到 404。登录要先把滑块对齐缺口。验证器可以不绑；绑定并打开两步验证后，登录才要填验证码。链接会标出是系统收录还是用户提交。
 
 会员视频解析不在这个项目里。
 
@@ -50,14 +50,16 @@ docker-compose.yml
 
 ## 初始化部署
 
-需要本机已有：
+本机需要：
 
 - Python 3.11 及以上
 - Node.js 20 及以上
 - MySQL 8，字符集 `utf8mb4`
-- Redis
+- Redis 6 及以上
 
-建库（空库起步时）：
+先启动 MySQL 和 Redis。下面按原生安装来写。端口以本机实际为准，示例用 MySQL `3306`、Redis `6379`。若 `3306` 已被占用，把建库、导入和 `DATABASE_URL` 里的端口改成同一个值。
+
+空库起步时建库并授权：
 
 ```sql
 CREATE DATABASE navhub CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
@@ -65,41 +67,71 @@ CREATE USER 'nav'@'%' IDENTIFIED BY 'navpass';
 GRANT ALL ON navhub.* TO 'nav'@'%';
 ```
 
-接口第一次启动会建表，并写入栏目、等级和目录种子。管理员账号来自下面的 `.env`。
+接口第一次启动会建表，并写入栏目、等级和目录种子。管理员账号来自 `backend/.env`。
 
-仓库里的 `backups/nav-local.sql` 是一份初始化数据，包含 `navhub`（站点）和 `navproxy`（代理池）。导入时会自己建库，可以跳过空库种子：
+仓库里的 `backups/nav-local.sql` 是一份初始化数据，包含 `navhub`（站点）和 `navproxy`（代理池）。导入时会自己建库，可以不再靠空库种子。Windows 和 Linux 命令相同，把 `mysql` 换成本机客户端的完整路径即可：
 
 ```bash
 mysql -h 127.0.0.1 -P 3306 -u root -p --default-character-set=utf8mb4 < backups/nav-local.sql
 ```
 
-这份 SQL 在仓库里，用来初始化。本地数据有变化、需要换一份时再导出：
+数据有变化、需要换一份初始化 SQL 时再导出：
 
 ```bash
-mysqldump -h 127.0.0.1 -P 3307 -u root --default-character-set=utf8mb4 --single-transaction --routines --triggers --set-gtid-purged=OFF --databases navhub navproxy --result-file=backups/nav-local.sql
+mysqldump -h 127.0.0.1 -P 3306 -u root -p --default-character-set=utf8mb4 --single-transaction --routines --triggers --set-gtid-purged=OFF --databases navhub navproxy --result-file=backups/nav-local.sql
 ```
 
-端口按实际 MySQL 修改。导入后把 `backend/.env` 的 `DATABASE_URL` 指到这台库。
+导入后把 `backend/.env` 的 `DATABASE_URL` 指到这台库。
 
-## 本地运行
+## 环境变量
 
-先启动 MySQL 和 Redis。数据库名 `navhub`，字符集 `utf8mb4`。
+```bash
+copy backend\.env.example backend\.env
+```
 
-`backend/.env` 示例：
+Linux / macOS：
+
+```bash
+cp backend/.env.example backend/.env
+```
+
+`.env` 不要提交。常用项：
+
+| 变量 | 作用 |
+| --- | --- |
+| `DATABASE_URL` | MySQL 连接串，库名 `navhub`，字符集 `utf8mb4` |
+| `REDIS_URL` | 会话、登录锁定、注册滑块 |
+| `SECRET_KEY` | 会话签名。公开部署前换成随机长串 |
+| `ADMIN_GATE` | 后台路径。留空时第一次启动生成 32 位并写回 `.env` |
+| `ADMIN_EMAIL` / `ADMIN_PASSWORD` | 第一次启动写入的管理员 |
+| `CORS_ORIGINS` | 允许带登录 Cookie 的前端地址，逗号分隔 |
+| `PROXY_POOL_URL` | 代理池地址。留空则抓取不走代理。本地默认 `http://127.0.0.1:8010` |
+| `FREE_MONTHLY_QUOTA` / `VIP_MONTHLY_QUOTA` | 每月可提交次数 |
+| `MAIL_*` | 发信。`MAIL_PROVIDER=log` 时只记日志，不真正发出 |
+
+示例：
 
 ```
 DATABASE_URL=mysql+pymysql://nav:navpass@127.0.0.1:3306/navhub?charset=utf8mb4
 REDIS_URL=redis://127.0.0.1:6379/0
 SECRET_KEY=change-this-secret
+ADMIN_GATE=
+ADMIN_EMAIL=admin@example.com
+ADMIN_PASSWORD=change-me-now
 CORS_ORIGINS=http://127.0.0.1:5173,http://localhost:5173
 PROXY_POOL_URL=
 FREE_MONTHLY_QUOTA=5
 VIP_MONTHLY_QUOTA=100
+MAIL_PROVIDER=log
 ```
 
-管理员邮箱和密码在 `backend/.env` 的 `ADMIN_EMAIL`、`ADMIN_PASSWORD` 里查看和修改。`.env` 不要提交。
+进程环境变量会覆盖 `.env`。本地若同时开着别的库，先确认当前终端里的 `DATABASE_URL` 指向 `navhub`。
 
-接口：
+## 本地运行
+
+三个进程分开开。接口和前端都只监听本机。
+
+接口，Windows：
 
 ```bash
 cd backend
@@ -108,7 +140,16 @@ python -m venv .venv
 .venv\Scripts\python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
 ```
 
-前端。Windows 上请直接用 Vite，不要把 `--host` 交给 `npm run dev`，否则参数会被吃掉：
+接口，Linux / macOS：
+
+```bash
+cd backend
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+.venv/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
+```
+
+前端。Windows 上请直接调用 Vite，不要把 `--host` 交给 `npm run dev`，否则参数会被吃掉：
 
 ```bash
 cd frontend
@@ -116,21 +157,42 @@ npm install
 .\node_modules\.bin\vite --host 127.0.0.1 --port 5173
 ```
 
-打开 http://127.0.0.1:5173/ 。
+Linux / macOS：
 
-也可以在项目根目录执行 `docker compose up`。Compose 里的 MySQL 用户是 `nav` / `navpass`，映射本机 `3306`。
+```bash
+cd frontend
+npm install
+./node_modules/.bin/vite --host 127.0.0.1 --port 5173
+```
+
+浏览器打开 http://127.0.0.1:5173/ 。接口健康检查是 http://127.0.0.1:8000/api/health 。
+
+可选代理池。先建库 `navproxy`，复制 `proxy-pool/.env.example` 为 `proxy-pool/.env`，再在 `proxy-pool` 目录执行：
+
+```bash
+pip install -r requirements.txt
+python -m uvicorn app:app --host 127.0.0.1 --port 8010
+```
+
+需要走代理抓取时，把站点 `PROXY_POOL_URL` 设为 `http://127.0.0.1:8010` 并重启接口。
+
+也可以在项目根目录用 Docker 一次拉起 MySQL、Redis、接口和前端：
+
+```bash
+docker compose up
+```
+
+Compose 里的 MySQL 用户是 `nav` / `navpass`，root 密码 `navroot`，映射本机 `3306`。已有 SQL 时，先 `docker compose up mysql -d`，把 `backups/nav-local.sql` 导入该实例，再启动其余服务。公开部署前改掉 Compose 里的 `SECRET_KEY`、管理员邮箱和密码。
 
 ## 管理员
 
 后台入口只认 `backend/.env` 里的 `ADMIN_GATE`。留空时第一次启动会生成 32 位随机码并写回 `.env`。改掉这段并重启接口后，只认新地址；旧地址接口返回 404，页面会回到首页。
 
-初始化管理员由 `backend/.env` 决定，第一次启动时写入数据库：
+登录地址是 `http://127.0.0.1:5173/` 加上 `ADMIN_GATE`。邮箱和密码是同一份文件里的 `ADMIN_EMAIL`、`ADMIN_PASSWORD`。登录页要把滑块拖到缺口上，缺口和形状每次刷新都会变。
 
-登录地址是 `http://127.0.0.1:5173/` 加上 `backend/.env` 里的 `ADMIN_GATE`。邮箱和密码看同一份文件里的 `ADMIN_EMAIL`、`ADMIN_PASSWORD`。
+公开部署前必须改掉邮箱、密码、`ADMIN_GATE` 和 `SECRET_KEY`。验证器可以不绑。绑定之后，只有打开两步验证开关，登录才要填验证码。后台可以新增管理员、重置密码、重置验证器，并禁用账号或 IP。被禁用的账号和 IP 不能再登录前台或后台。
 
-公开部署前必须改掉 `backend/.env` 里的邮箱、密码、`ADMIN_GATE` 和 `SECRET_KEY`。验证器可以不绑。绑定之后，只有打开两步验证开关，登录才要填验证码。
-
-后台可以维护栏目、分类、链接、单页、广告、等级、积分规则和用户。链接列表能改收藏数和推荐数。报警页可以封禁账号和 IP。广告按位置分组，例如首页轮播、各栏目信息流、页脚、登录页、个人中心右侧。
+后台可以维护栏目、分类、链接、资讯、单页、公告、广告、等级、积分规则、用户和代理。链接列表能改收藏数和推荐数。报警页可以封禁账号和 IP。广告按位置分组，例如首页轮播、各栏目信息流、页脚、登录页、个人中心右侧。
 
 ## 定时任务
 
@@ -177,8 +239,16 @@ npm install
 
 按「初始化部署」装好 MySQL、Redis，导入 `backups/nav-local.sql` 或让接口首次启动建表。然后：
 
-1. 复制 `backend/.env.example` 为 `backend/.env`，改掉数据库地址、`SECRET_KEY`、管理员邮箱和密码。
-2. 按「本地运行」安装依赖并启动接口和前端，或在项目根目录执行 `docker compose up`。Compose 里的 MySQL 用户是 `nav` / `navpass`，映射本机 `3306`。已有 SQL 时，可先把备份导入 Compose 的 MySQL，再启动接口。
-3. `deploy/nginx.conf` 把 `/` 转到前端，把 `/api` 转到接口。
+1. 复制 `backend/.env.example` 为 `backend/.env`，改掉数据库地址、`SECRET_KEY`、`ADMIN_GATE`、管理员邮箱和密码。`CORS_ORIGINS` 改成实际上线的站点地址。
+2. 按「本地运行」安装依赖。开发时启动接口和 Vite。正式环境先构建前端：
 
-生产环境应关掉调试、更换密钥，并限制后台路径不要出现在公开页面上。首页底部栏可以关掉，关掉后这次浏览不再显示，刷新页面会再出现。
+```bash
+cd frontend
+npm run build
+```
+
+产物在 `frontend/dist`。接口仍用 uvicorn 监听 `8000`，前面加进程守护。
+
+3. `deploy/nginx.conf` 是同域反代示例：`/api` 转到接口，`/` 转到前端。文件里的 `api`、`web` 是 Compose 服务名。原生部署时把它们改成 `127.0.0.1:8000` 和前端静态目录或预览端口。
+
+生产环境应更换密钥，后台路径不要出现在公开页面上。首页底部栏可以关掉，关掉后这次浏览不再显示，刷新页面会再出现。
