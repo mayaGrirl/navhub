@@ -82,15 +82,22 @@ button, input, textarea, select { font: inherit; }
 .side-jump button.on { background: #fff; color: #14643f; font-weight: 650; box-shadow: 0 1px 2px rgba(24, 39, 75, 0.06); }
 .side-jump button.on i { background: #1f6b4a; }
 .side-jump button.on em { color: #1f6b4a; }
-.mast { display: grid; grid-template-columns: 210px minmax(420px, 1fr) minmax(300px, 380px); gap: 28px; align-items: center; margin: 0; padding: 18px 28px 22px; background: linear-gradient(180deg, rgba(255, 255, 255, 0.28), rgba(255, 255, 255, 0)); border-bottom: 0; }
-.mast-brand { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; min-width: 0; max-width: 280px; }
-.ticker { max-width: 240px; height: 22px; overflow: hidden; }
-.ticker-track { display: flex; gap: 32px; width: max-content; }
-.ticker.run .ticker-track { animation: ticker 16s linear infinite; }
+.mast { display: grid; grid-template-columns: 250px minmax(420px, 1fr) minmax(300px, 380px); gap: 28px; align-items: center; margin: 0; padding: 18px 28px 22px; background: linear-gradient(180deg, rgba(255, 255, 255, 0.28), rgba(255, 255, 255, 0)); border-bottom: 0; }
+.mast-brand { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; min-width: 0; max-width: none; }
+.mast-brand > a { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; color: inherit; text-decoration: none; }
+.ticker { display: flex; align-items: flex-start; width: 100%; padding: 8px 10px; border: 1px solid #e4efe8; border-radius: 12px; background: rgba(255, 255, 255, .92); box-shadow: 0 8px 20px rgba(20, 40, 32, .05); }
+.ticker-window { flex: 1; min-width: 0; height: auto; max-height: 84px; overflow: hidden; }
+.ticker.run .ticker-window { height: 84px; }
+.ticker-track { display: flex; flex-direction: column; width: 100%; min-width: 0; }
+.ticker.run .ticker-track { animation: ticker 12s linear infinite; }
 .ticker:hover .ticker-track { animation-play-state: paused; }
-.ticker button { border: 0; background: transparent; padding: 0; color: #5c6b7a; white-space: nowrap; cursor: pointer; }
-.ticker button:hover { color: #14643f; }
-@keyframes ticker { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+.ticker button { display: flex; align-items: center; gap: 8px; width: 100%; min-width: 0; height: 28px; border: 0; border-radius: 8px; background: transparent; padding: 0 4px; color: #243042; font-size: 13px; font-weight: 600; text-align: left; cursor: pointer; }
+.ticker button svg { width: 16px; height: 16px; flex: none; fill: #14643f; }
+.ticker button span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ticker button i { flex: none; color: #98a2b3; font-style: normal; font-size: 16px; line-height: 1; }
+.ticker button:hover { color: #14643f; background: #f4fbf7; }
+.ticker button:hover i { color: #14643f; }
+@keyframes ticker { from { transform: translateY(0); } to { transform: translateY(-50%); } }
 .mast-name { display: flex; align-items: center; gap: 10px; }
 .mast-brand strong { font-size: 22px; letter-spacing: 0.16em; line-height: 1; }
 .mast-brand span { color: #8b939e; font-size: 12px; line-height: 1.45; }

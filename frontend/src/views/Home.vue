@@ -297,7 +297,7 @@ function setLocale(next) {
 
 const welcome = computed(() => locale.value === "zh" ? "欢迎来到 NEXA" : "Welcome to NEXA");
 const openNote = ref(null);
-const tickerNotes = computed(() => notes.value.length > 1 ? notes.value.concat(notes.value) : notes.value);
+const tickerNotes = computed(() => notes.value.length > 3 ? notes.value.concat(notes.value) : notes.value);
 
 function siteIcon(url) {
   try {
@@ -516,15 +516,23 @@ onUnmounted(() => {
       </article>
     </div>
     <section class="mast">
-      <a class="mast-brand" href="/">
-        <span class="mast-name"><img class="mast-mark" src="/logo.svg" alt="" /><strong>NEXA</strong></span>
-        <span>{{ welcome }}</span>
-        <div v-if="notes.length" class="ticker" :class="{ run: notes.length > 1 }">
-          <div class="ticker-track">
-            <button v-for="(note, index) in tickerNotes" :key="note.id + '-' + index" type="button" @click="openNote = note">{{ note.title }}</button>
+      <div class="mast-brand">
+        <a href="/">
+          <span class="mast-name"><img class="mast-mark" src="/logo.svg" alt="" /><strong>NEXA</strong></span>
+          <span>{{ welcome }}</span>
+        </a>
+        <div v-if="notes.length" class="ticker" :class="{ run: notes.length > 3 }">
+          <div class="ticker-window">
+            <div class="ticker-track" :style="notes.length > 3 ? { animationDuration: `${notes.length * 2.2}s` } : null">
+              <button v-for="(note, index) in tickerNotes" :key="note.id + '-' + index" type="button" @click.stop="openNote = note">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9v6h3l5 4V5L7 9H4zm11.5 3a3.5 3.5 0 0 0-1.8-3.05v6.1A3.5 3.5 0 0 0 15.5 12zM14 4.2v2.1a6 6 0 0 1 0 11.4v2.1a8 8 0 0 0 0-15.6z"/></svg>
+                <span>{{ note.title }}</span>
+                <i>›</i>
+              </button>
+            </div>
           </div>
         </div>
-      </a>
+      </div>
       <div class="finder">
         <div class="engines">
           <div v-for="group in engineGroups" :key="group.en" class="engine-row">
