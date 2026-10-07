@@ -1,6 +1,7 @@
 import ipaddress
 import socket
-from urllib.parse import urljoin, urlparse
+import time
+from urllib.parse import parse_qs, quote_plus, unquote, urljoin, urlparse
 
 import httpx
 from bs4 import BeautifulSoup
@@ -12,38 +13,66 @@ BROWSER = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/
 SKIP_EXT = (".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg", ".css", ".js", ".pdf", ".zip", ".mp4", ".ico", ".woff", ".woff2")
 
 
-def _proxy_list(limit: int = 16) -> list[str]:
+_proxies: list[str] = []
+_proxies_at = 0.0
+_good = ""
+
+
+def _proxy_list() -> list[str]:
+    global _proxies_at
     base = (settings.proxy_pool_url or "").rstrip("/")
     if not base:
         raise RuntimeError("代理池未配置")
-    found = []
-    for _ in range(limit * 2):
+    now = time.time()
+    if _proxies and now - _proxies_at < 20:
+        found = list(_proxies)
+    else:
         try:
-            response = httpx.get(f"{base}/acquire", timeout=3)
-            proxy = response.json().get("proxy") if response.status_code == 200 else None
-        except httpx.HTTPError:
-            proxy = None
-        if proxy and proxy not in found:
-            found.append(proxy)
-        if len(found) >= limit:
-            break
-    if not found:
-        raise RuntimeError("代理池是空的")
+            response = httpx.get(f"{base}/alive", timeout=8)
+            response.raise_for_status()
+            items = response.json().get("items") or []
+        except Exception as exc:
+            raise RuntimeError("读取有效代理失败") from exc
+        found = []
+        for item in items:
+            url = item.get("url") if isinstance(item, dict) else item
+            if url and url not in found:
+                found.append(url)
+        if not found:
+            raise RuntimeError("代理池里没有有效代理")
+        _proxies[:] = found
+        _proxies_at = now
+    if _good in found:
+        found.remove(_good)
+        found.insert(0, _good)
     return found
 
 
+def _get(url: str, proxy: str, follow: bool):
+    with httpx.Client(timeout=6, follow_redirects=follow, max_redirects=4, headers=BROWSER, proxy=proxy) as client:
+        return client.get(url)
+
+
 def _open(url: str):
+    global _good
+    proxies = _proxy_list()
     last = "没有可用代理"
-    for proxy in _proxy_list():
-        try:
-            with httpx.Client(timeout=8, follow_redirects=True, max_redirects=5, headers=BROWSER, proxy=proxy) as client:
-                response = client.get(url)
-            if response.status_code < 400 and response.text:
-                return response
-            last = f"HTTP {response.status_code}"
-        except Exception as exc:
-            last = exc.__class__.__name__
-    raise RuntimeError(last)
+    targets = [url]
+    parsed = urlparse(url)
+    if parsed.scheme == "https":
+        targets.append(parsed._replace(scheme="http").geturl())
+    for target in targets:
+        follow = target == url
+        for proxy in proxies:
+            try:
+                response = _get(target, proxy, follow)
+                if response.status_code < 400 and (response.text or "").strip():
+                    _good = proxy
+                    return response
+                last = f"HTTP {response.status_code}"
+            except Exception as exc:
+                last = exc.__class__.__name__
+    raise RuntimeError(f"{last}，已试完 {len(proxies)} 个有效代理")
 
 
 def _public_url(url: str) -> str:
@@ -79,41 +108,123 @@ def fetch_meta(url: str) -> dict:
     return {"title": title[:180], "description": description[:500], "logo_url": image[:500], "url": url}
 
 
+def _label(anchor) -> str:
+    title = " ".join(anchor.get_text(" ", strip=True).split())
+    if not title:
+        title = (anchor.get("title") or anchor.get("aria-label") or "").strip()
+    if not title:
+        img = anchor.find("img")
+        if img:
+            title = (img.get("alt") or "").strip()
+    return " ".join(title.split())
+
+
+def _push(found, seen, title, href, image=""):
+    parsed = urlparse(href)
+    host = (parsed.hostname or "").lower()
+    if parsed.scheme not in {"http", "https"} or not host:
+        return
+    if host in {"localhost"} or host.endswith(".local"):
+        return
+    try:
+        ip = ipaddress.ip_address(host)
+        if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved:
+            return
+    except ValueError:
+        pass
+    path = parsed.path.lower()
+    if any(path.endswith(ext) for ext in SKIP_EXT):
+        return
+    key = href.rstrip("/")
+    if key in seen or len(title) < 2 or len(title) > 80:
+        return
+    seen.add(key)
+    found.append({"title": title[:180], "url": href[:500], "description": "", "logo_url": (image or "")[:500]})
+
+
 def collect_page(url: str) -> list[dict]:
     url = _public_url(url)
     response = _open(url)
-    soup = BeautifulSoup(response.text, "html.parser")
+    text = response.text or ""
+    soup = BeautifulSoup(text, "html.parser")
     found = []
     seen = set()
+    if soup.find("item") or soup.find("entry"):
+        for node in soup.find_all(["item", "entry"])[:40]:
+            title = node.find("title")
+            link = node.find("link")
+            name = title.get_text(strip=True) if title else ""
+            href = ""
+            if link and link.get("href"):
+                href = link["href"]
+            elif link:
+                href = link.get_text(strip=True)
+            if name and href:
+                _push(found, seen, name, urljoin(str(response.url), href))
+        if found:
+            return found
     for anchor in soup.find_all("a", href=True):
-        title = " ".join(anchor.get_text(" ", strip=True).split())
-        if not title or len(title) < 2 or len(title) > 80:
+        title = _label(anchor)
+        if not title:
             continue
-        href = urljoin(response.url, anchor["href"]).split("#")[0]
-        parsed = urlparse(href)
-        if parsed.scheme not in {"http", "https"} or not parsed.hostname:
-            continue
-        path = parsed.path.lower()
-        if any(path.endswith(ext) for ext in SKIP_EXT):
-            continue
-        key = href.rstrip("/")
-        if key in seen:
-            continue
-        seen.add(key)
+        href = urljoin(str(response.url), anchor["href"]).split("#")[0]
         image = ""
         img = anchor.find("img")
         if img and img.get("src"):
-            image = urljoin(response.url, img["src"])[:500]
-        found.append({"title": title[:180], "url": href[:500], "description": "", "logo_url": image})
+            image = urljoin(str(response.url), img["src"])
+        _push(found, seen, title, href, image)
         if len(found) >= 40:
             break
     if not found:
         title = ""
         if soup.title and soup.title.string:
             title = soup.title.string.strip()
+        og = soup.find("meta", attrs={"property": "og:title"})
+        if og and og.get("content"):
+            title = og["content"].strip()
         if title:
             found.append({"title": title[:180], "url": str(response.url)[:500], "description": "", "logo_url": ""})
     return found
+
+
+def search_web(keyword: str) -> list[dict]:
+    query = keyword.strip()
+    if not query:
+        raise RuntimeError("请填写关键词或网址")
+    pages = []
+    seen_host = set()
+    skip_hosts = ("duckduckgo.com", "bing.com", "microsoft.com", "google.com", "gstatic.com")
+
+    def take(title, href):
+        if "uddg=" in href:
+            href = unquote(parse_qs(urlparse(href).query).get("uddg", [""])[0])
+        href = href.split("#")[0]
+        if not href.startswith("http"):
+            return
+        host = (urlparse(href).hostname or "").lower()
+        if not host or any(host.endswith(item) for item in skip_hosts) or host in seen_host:
+            return
+        seen_host.add(host)
+        pages.append({"title": (title or host)[:180], "url": href[:500], "description": "", "logo_url": ""})
+
+    url = f"https://html.duckduckgo.com/html/?q={quote_plus(query)}"
+    response = _open(url)
+    soup = BeautifulSoup(response.text, "html.parser")
+    anchors = soup.select("a.result__a") or soup.select("a[href*='uddg=']")
+    for anchor in anchors:
+        take(" ".join(anchor.get_text(" ", strip=True).split()), anchor.get("href") or "")
+        if len(pages) >= 40:
+            return pages
+    if not pages:
+        response = _open(f"https://www.bing.com/search?q={quote_plus(query)}&count=30")
+        soup = BeautifulSoup(response.text, "html.parser")
+        for anchor in soup.select("li.b_algo h2 a"):
+            take(" ".join(anchor.get_text(" ", strip=True).split()), anchor.get("href") or "")
+            if len(pages) >= 40:
+                break
+    if not pages:
+        raise RuntimeError("没有搜到可收录的站点")
+    return pages
 
 
 import threading
@@ -165,7 +276,7 @@ def _run_job(job_id: int) -> None:
         job.status = "running"
         job.message = ""
         db.commit()
-        _log(db, job_id, f"开始采集 {job.list_url}")
+        _log(db, job_id, f"开始采集 {job.keyword or job.list_url or job.name}")
         if _stopped(job_id):
             job.status = "stopped"
             job.message = "已停止"
@@ -173,7 +284,12 @@ def _run_job(job_id: int) -> None:
             db.commit()
             return
         try:
-            pages = collect_page(job.list_url)
+            if (job.list_url or "").strip():
+                _log(db, job_id, f"按网址采集 {job.list_url}")
+                pages = collect_page(job.list_url)
+            else:
+                _log(db, job_id, f"按关键词全网采集 {job.keyword or job.name}")
+                pages = search_web(job.keyword or job.name)
         except Exception as exc:
             job.status = "error"
             job.message = str(exc)[:500]
@@ -181,7 +297,7 @@ def _run_job(job_id: int) -> None:
             _log(db, job_id, f"打开失败：{job.message}")
             db.commit()
             return
-        _log(db, job_id, f"页面已打开，识别到 {len(pages)} 个站点")
+        _log(db, job_id, f"识别到 {len(pages)} 个站点")
         found = 0
         for page in pages:
             if _stopped(job_id):
@@ -205,8 +321,8 @@ def _run_job(job_id: int) -> None:
             found += 1
             _log(db, job_id, f"收录待审 {page['title']}")
         else:
-            job.status = "done" if found else "error"
-            job.message = "" if found else "页面里没有可采集的站点名称"
+            job.status = "done"
+            job.message = "" if found else "没有新的站点，已有记录都跳过了"
             if not found:
                 _log(db, job_id, job.message)
         job.found_count = (job.found_count or 0) + found

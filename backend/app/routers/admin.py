@@ -10,8 +10,8 @@ from sqlalchemy.orm import Session
 
 from app.crawl import fetch_meta, schedule_jobs, start_job, stop_job
 from app.deps import db_session, require_admin, require_admin_setup
-from app.security import hash_password
-from app.models import Ad, AdminAlert, Announcement, AuthLog, Category, CrawlItem, CrawlJob, CrawlLog, IpBan, Level, Link, NewsItem, Page, PointRule, Tab, User
+from app.security import client_ip, hash_password, checked_image
+from app.models import Ad, AdminAlert, Announcement, AuthLog, Category, CrawlItem, CrawlJob, CrawlLog, IpBan, Level, Link, MailLog, MailTask, NewsItem, Page, PointRule, Tab, User
 from app.urls import norm_url
 router = APIRouter(prefix="/api/manage", tags=["admin"], dependencies=[Depends(require_admin)])
 setup_router = APIRouter(prefix="/api/manage", tags=["admin"])
@@ -470,14 +470,11 @@ def delete_ad(ad_id: int, db: Session = Depends(db_session)):
 
 @router.post("/uploads")
 async def upload_ad_image(file: UploadFile = File(...)):
-    if not (file.content_type or "").startswith("image/"):
-        raise HTTPException(status_code=400, detail="image required")
     raw = await file.read()
-    if not raw or len(raw) > 2 * 1024 * 1024:
-        raise HTTPException(status_code=400, detail="image required")
-    suffix = Path(file.filename or "").suffix.lower()
-    if suffix not in {".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"}:
-        suffix = ".png"
+    try:
+        suffix = checked_image(raw)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="image required") from exc
     folder = Path(__file__).resolve().parents[3] / "frontend" / "public" / "uploads"
     folder.mkdir(parents=True, exist_ok=True)
     name = f"{uuid.uuid4().hex}{suffix}"
@@ -562,8 +559,7 @@ def delete_announcement(item_id: int, db: Session = Depends(db_session)):
 
 @router.get("/users")
 def users(request: Request, db: Session = Depends(db_session), actor: User = Depends(require_admin)):
-    forwarded = request.headers.get("x-forwarded-for", "")
-    ip = forwarded.split(",")[0].strip()[:64] if forwarded else (request.client.host if request.client else "")[:64]
+    ip = client_ip(request)
     if ip and actor.last_ip != ip:
         actor.last_ip = ip
         db.commit()
@@ -722,6 +718,7 @@ def jobs(db: Session = Depends(db_session)):
             "id": r.id,
             "name": r.name,
             "list_url": r.list_url,
+            "keyword": r.keyword or "",
             "category_id": r.category_id,
             "interval_minutes": r.interval_minutes,
             "enabled": r.enabled,
@@ -749,9 +746,14 @@ def crawl_logs(job_id: int = 0, db: Session = Depends(db_session)):
 
 @router.post("/crawl/jobs")
 def create_job(payload: dict, db: Session = Depends(db_session)):
+    keyword = (payload.get("keyword") or payload.get("name") or "").strip()
+    list_url = (payload.get("list_url") or "").strip()
+    if not list_url and not keyword:
+        raise HTTPException(400, "填写关键词或网址")
     row = CrawlJob(
-        name=payload.get("name") or "采集任务",
-        list_url=payload["list_url"],
+        name=payload.get("name") or keyword or "采集任务",
+        list_url=list_url,
+        keyword=keyword,
         category_id=int(payload["category_id"]),
         interval_minutes=max(1, int(payload.get("interval_minutes") or 1440)),
         enabled=True,
@@ -771,11 +773,15 @@ def update_job(job_id: int, payload: dict, db: Session = Depends(db_session)):
     if "name" in payload:
         row.name = payload.get("name") or row.name
     if "list_url" in payload:
-        row.list_url = payload.get("list_url") or row.list_url
+        row.list_url = (payload.get("list_url") or "").strip()
+    if "keyword" in payload:
+        row.keyword = (payload.get("keyword") or "").strip()
     if "category_id" in payload:
         row.category_id = int(payload["category_id"])
     if "interval_minutes" in payload:
         row.interval_minutes = max(1, int(payload.get("interval_minutes") or 1440))
+    if not (row.list_url or "").strip() and not (row.keyword or row.name or "").strip():
+        raise HTTPException(400, "填写关键词或网址")
     db.commit()
     return {"ok": True}
 
@@ -962,4 +968,80 @@ def remove_proxy_source(url: str):
     if not base:
         raise HTTPException(status_code=400, detail="proxy pool is not running")
     httpx.delete(f"{base}/sources", params={"url": url}, timeout=8)
+    return {"ok": True}
+
+
+@router.get("/mail")
+def mail_state(db: Session = Depends(db_session)):
+    from app.mailer import mail_row, public_mail
+    row = mail_row(db)
+    logs = db.scalars(select(MailLog).order_by(MailLog.id.desc()).limit(30)).all()
+    tasks = db.scalars(select(MailTask).order_by(MailTask.id.desc())).all()
+    return {
+        "settings": public_mail(row),
+        "tasks": [
+            {"id": t.id, "subject": t.subject, "body": t.body, "audience": t.audience, "run_at": t.run_at.isoformat() if t.run_at else "", "interval_minutes": t.interval_minutes, "enabled": t.enabled}
+            for t in tasks
+        ],
+        "logs": [
+            {"id": r.id, "recipient": r.recipient, "subject": r.subject, "channel": r.channel, "status": r.status, "message": r.message, "created_at": r.created_at.isoformat() if r.created_at else ""}
+            for r in logs
+        ],
+    }
+
+
+@router.put("/mail")
+def save_mail(payload: dict, db: Session = Depends(db_session)):
+    from app.mailer import mail_row, public_mail
+    row = mail_row(db)
+    for key in ("gmail_enabled", "netease_enabled", "sendgrid_enabled", "mailgun_enabled", "ses_enabled", "notify_default", "money_dm"):
+        if key in payload:
+            setattr(row, key, bool(payload[key]))
+    db.commit()
+    return public_mail(row)
+
+
+@router.post("/mail/test")
+def test_mail(payload: dict, db: Session = Depends(db_session)):
+    from app.mailer import deliver
+    email = (payload.get("email") or "").strip()
+    if "@" not in email:
+        raise HTTPException(400, "填写测试邮箱")
+    channel = deliver(db, email, "NEXA 测试邮件", "这是一封配置测试邮件。收到它，说明当前发信通道可用。")
+    last = db.scalars(select(MailLog).order_by(MailLog.id.desc()).limit(1)).first()
+    return {"ok": channel not in {"error", "log"}, "channel": channel, "message": (last.message if last else "") or ("已发送" if channel not in {"error", "log"} else "只记了日志，发信账号还没配好")}
+def send_mail_now(payload: dict, db: Session = Depends(db_session)):
+    from app.mailer import deliver, send_bulk
+    subject = (payload.get("subject") or "").strip()
+    body = (payload.get("body") or "").strip()
+    if not subject or not body:
+        raise HTTPException(400, "填写标题和正文")
+    email = (payload.get("email") or "").strip()
+    if email:
+        channel = deliver(db, email, subject, body)
+        return {"sent": 1, "channel": channel}
+    result = send_bulk(subject, body, payload.get("audience") or "all")
+    return result
+
+
+@router.post("/mail/tasks")
+def create_mail_task(payload: dict, db: Session = Depends(db_session)):
+    subject = (payload.get("subject") or "").strip()
+    body = (payload.get("body") or "").strip()
+    if not subject or not body:
+        raise HTTPException(400, "填写标题和正文")
+    when = payload.get("run_at") or ""
+    run_at = datetime.fromisoformat(when.replace("Z", "")) if when else datetime.utcnow()
+    row = MailTask(subject=subject, body=body, audience=payload.get("audience") or "all", run_at=run_at, interval_minutes=max(0, int(payload.get("interval_minutes") or 0)), enabled=True)
+    db.add(row)
+    db.commit()
+    return {"id": row.id}
+
+
+@router.delete("/mail/tasks/{task_id}")
+def delete_mail_task(task_id: int, db: Session = Depends(db_session)):
+    row = db.get(MailTask, task_id)
+    if row:
+        db.delete(row)
+        db.commit()
     return {"ok": True}

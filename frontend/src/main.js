@@ -142,4 +142,20 @@ const i18n = createI18n({
   },
 });
 
+function setMeta(selector, attr, content) {
+  const el = document.querySelector(selector);
+  if (el && content) el.setAttribute(attr, content);
+}
+
+router.afterEach((to) => {
+  const title = to.meta.title || "NEXA";
+  if (!to.path || to.path === "/") return;
+  document.title = title;
+  setMeta('meta[name="description"]', "content", to.meta.description || "NEXA");
+  setMeta('meta[property="og:title"]', "content", title);
+  setMeta('meta[name="robots"]', "content", to.meta.index === false ? "noindex,nofollow" : "index,follow,max-image-preview:large");
+  const canonical = document.querySelector('link[rel="canonical"]');
+  if (canonical) canonical.setAttribute("href", to.path);
+});
+
 createApp(App).use(createPinia()).use(router).use(i18n).mount("#app");

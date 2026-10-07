@@ -17,6 +17,11 @@ const ready = ref(false);
 const missing = ref(false);
 const section = ref("overview");
 const query = ref("");
+const listTab = ref("");
+const listCat = ref("");
+const listSource = ref("");
+const listStatus = ref("");
+const filterCats = computed(() => categories.value.filter((cat) => !listTab.value || cat.tab_id === Number(listTab.value)));
 const pageNo = ref(1);
 const pageSize = ref(10);
 const jumpNo = ref(1);
@@ -95,12 +100,38 @@ const sectionTitle = computed(() => ({
   proxies: tx("代理", "Proxies"),
   levels: tx("等级", "Levels"),
   security: tx("账号安全", "Security"),
+  mail: tx("邮件", "Mail"),
 }[section.value] || ""));
-watch(section, () => { query.value = ""; pageNo.value = 1; jumpNo.value = 1; picked.value = []; editor.value = null; notice.value = ""; });
-watch(query, () => { pageNo.value = 1; jumpNo.value = 1; picked.value = []; });
-function pageOf(rows, keys) {
+watch(section, () => {
+  query.value = "";
+  listTab.value = "";
+  listCat.value = "";
+  listSource.value = "";
+  listStatus.value = "";
+  pageNo.value = 1;
+  jumpNo.value = 1;
+  picked.value = [];
+  editor.value = null;
+  notice.value = "";
+  load();
+});
+watch([query, listTab, listCat, listSource, listStatus], () => { pageNo.value = 1; jumpNo.value = 1; picked.value = []; });
+function hitText(row, keys) {
   const text = query.value.trim().toLowerCase();
-  const filtered = text ? rows.filter((row) => keys.some((key) => String(row[key] ?? "").toLowerCase().includes(text))) : rows.slice();
+  if (!text) return true;
+  return keys.some((key) => String(row[key] ?? "").toLowerCase().includes(text));
+}
+function inTab(categoryId) {
+  const tabId = Number(listTab.value) || 0;
+  const catId = Number(listCat.value) || 0;
+  if (!tabId && !catId) return true;
+  if (catId && categoryId !== catId) return false;
+  if (!tabId) return true;
+  const cat = categories.value.find((item) => item.id === categoryId);
+  return cat?.tab_id === tabId;
+}
+function pageOf(rows, keys) {
+  const filtered = rows.filter((row) => hitText(row, keys));
   const size = pageSize.value;
   const pages = Math.max(1, Math.ceil(filtered.length / size) || 1);
   const current = Math.min(pageNo.value, pages);
@@ -115,13 +146,13 @@ function changePageSize() {
   pageNo.value = 1;
   jumpNo.value = 1;
 }
-const linkView = computed(() => pageOf(links.value.map((row) => ({ ...row, name: row.title_zh || row.title_en })), ["name", "url", "status", "source"]));
-const tabView = computed(() => pageOf(tabs.value, ["title_zh", "title_en", "slug"]));
-const catView = computed(() => pageOf(categories.value, ["title_zh", "title_en", "slug"]));
-const newsView = computed(() => pageOf(news.value, ["title", "source", "category"]));
+const linkView = computed(() => pageOf(links.value.filter((row) => inTab(row.category_id) && (!listSource.value || row.source === listSource.value)).map((row) => ({ ...row, name: row.title_zh || row.title_en })), ["name", "url"]));
+const tabView = computed(() => pageOf(tabs.value.filter((row) => !listStatus.value || row.kind === listStatus.value), ["title_zh", "title_en", "slug"]));
+const catView = computed(() => pageOf(categories.value.filter((row) => !listTab.value || row.tab_id === Number(listTab.value)), ["title_zh", "title_en", "slug"]));
+const newsView = computed(() => pageOf(news.value.filter((row) => !listStatus.value || row.category === listStatus.value), ["title", "source"]));
 const pageView = computed(() => pageOf(pages.value, ["key", "title_zh", "title_en"]));
 const noteKind = ref("ticker");
-const noteView = computed(() => pageOf(announcements.value.filter((row) => (noteKind.value === "popup" ? row.popup : !row.popup)), ["title_zh", "title_en", "body_zh"]));
+const noteView = computed(() => pageOf(announcements.value.filter((row) => (noteKind.value === "popup" ? row.popup : !row.popup) && (listStatus.value === "" || String(row.enabled) === listStatus.value)), ["title_zh", "title_en"]));
 const adView = computed(() => {
   const order = slotGroups.flatMap((group) => group.items.map((item) => ({ ...item, page: group.page })));
   const rows = [];
@@ -134,22 +165,23 @@ const adView = computed(() => {
       const where = `${item.page} · ${item.where}`;
       rows.push({
         ...row,
-        where: item.carousel && group.length > 1 ? `${where} · 第 ${slide + 1} 张` : where,
+        page: item.page,
         no: index + 1,
         carousel: !!item.carousel,
         slideCount: group.length,
       });
     });
   });
-  return pageOf(rows, ["where", "title_zh", "title_en"]);
+  const picked = rows.filter((row) => (!listStatus.value || String(!!row.enabled) === listStatus.value) && (!listTab.value || row.page === listTab.value));
+  return pageOf(picked, ["where", "title_zh", "title_en"]);
 });
 const crawlKind = ref("jobs");
 const crawlLogs = ref([]);
 const logJob = ref(0);
-const jobView = computed(() => pageOf(jobs.value.map((row) => ({ ...row, category: categories.value.find((cat) => cat.id === row.category_id)?.title_zh || "" })), ["name", "list_url", "category", "status"]));
-const crawlView = computed(() => pageOf(items.value, ["title", "url"]));
+const jobView = computed(() => pageOf(jobs.value.filter((row) => inTab(row.category_id) && (!listStatus.value || row.status === listStatus.value)).map((row) => ({ ...row, category: categories.value.find((cat) => cat.id === row.category_id)?.title_zh || "" })), ["name", "list_url"]));
+const crawlView = computed(() => pageOf(items.value.filter((row) => inTab(row.category_id)), ["title", "url"]));
 const userKind = ref("member");
-const memberView = computed(() => pageOf(users.value.filter((row) => row.role !== "admin"), ["email", "role", "last_ip", "plan"]));
+const memberView = computed(() => pageOf(users.value.filter((row) => row.role !== "admin" && (!listStatus.value || row.plan === listStatus.value)), ["email", "last_ip"]));
 const adminUserView = computed(() => pageOf(users.value.filter((row) => row.role === "admin"), ["email", "role", "last_ip"]));
 const proxyView = computed(() => pageOf(proxies.value.items || [], ["url"]));
 const sourceView = computed(() => pageOf(proxies.value.source_items || [], ["url"]));
@@ -161,6 +193,7 @@ const proxyKind = ref("alive");
 const activeView = computed(() => {
   if (section.value === "proxies" && proxyKind.value === "sources") return sourceView.value;
   if (section.value === "crawl") return crawlKind.value === "jobs" ? jobView.value : crawlView.value;
+  if (section.value === "users") return userKind.value === "admin" ? adminUserView.value : memberView.value;
   return views[section.value] ? views[section.value].value : { rows: [], total: 0, pages: 1, current: 1 };
 });
 function togglePick(id, on) {
@@ -237,6 +270,10 @@ const dragging = ref(false);
 const matched = ref(false);
 const switchCode = ref("");
 const proxies = ref({ count: 0, sources: 0, items: [], source_items: [], note: "" });
+const mailState = ref({ settings: {}, tasks: [], logs: [] });
+const mailForm = ref({ subject: "", body: "", audience: "all", email: "", run_at: "", interval_minutes: 0 });
+const mailTest = ref("");
+const mailHint = ref("");
 const me = ref(null);
 const totp = ref(null);
 const code = ref("");
@@ -277,45 +314,63 @@ const consolePassword = ref("");
 const consoleCode = ref("");
 const needConsole = ref(false);
 
-async function load() {
-  const [t, c, l, p, a, u, j, i, lv, al, nw, notes, bans] = await Promise.all([
-    http.get("/manage/tabs"),
-    http.get("/manage/categories"),
-    http.get("/manage/links"),
-    http.get("/manage/pages"),
-    http.get("/manage/ads"),
-    http.get("/manage/users"),
-    http.get("/manage/crawl/jobs"),
-    http.get("/manage/crawl/items"),
-    http.get("/manage/levels"),
-    http.get("/manage/alerts"),
-    http.get("/manage/news"),
-    http.get("/manage/announcements"),
-    http.get("/manage/ip-bans"),
-  ]);
-  tabs.value = t.data;
-  categories.value = c.data;
-  links.value = l.data;
-  linkStats.value = (await http.get("/manage/link-stats")).data;
-  pages.value = p.data;
-  ads.value = a.data;
-  users.value = u.data;
-  jobs.value = j.data;
-  items.value = i.data;
-  levels.value = lv.data.levels || [];
-  pointsPerLink.value = lv.data.points_per_link || 1;
-  alerts.value = al.data;
-  news.value = nw.data;
-  announcements.value = notes.data;
-  ipBans.value = bans.data;
-  if (!linkForm.value.category_id && categories.value[0]) linkForm.value.category_id = categories.value[0].id;
-  if (!catForm.value.tab_id && tabs.value[0]) catForm.value.tab_id = tabs.value[0].id;
-  try {
-    proxies.value = (await http.get("/manage/proxies")).data;
-  } catch {
-    proxies.value = { count: 0, sources: 0, items: [], note: "unavailable" };
+const listLoading = ref(true);
+let loadSeq = 0;
+async function load(quiet = false) {
+  const seq = ++loadSeq;
+  const name = section.value;
+  if (!quiet) listLoading.value = true;
+  const tasks = [];
+  const apply = [];
+  const take = (url, fn) => tasks.push(http.get(url).then((res) => apply.push(() => fn(res.data))));
+  if (name === "overview") {
+    take("/manage/link-stats", (data) => { linkStats.value = data; });
+    tasks.push(loadTrend());
+  } else if (name === "links") {
+    take("/manage/links", (data) => { links.value = data; });
+    take("/manage/tabs", (data) => { tabs.value = data; });
+    take("/manage/categories", (data) => { categories.value = data; });
+  } else if (name === "structure" || name === "categories") {
+    take("/manage/tabs", (data) => { tabs.value = data; });
+    take("/manage/categories", (data) => { categories.value = data; });
+  } else if (name === "news") {
+    take("/manage/news", (data) => { news.value = data; });
+  } else if (name === "pages") {
+    take("/manage/pages", (data) => { pages.value = data; });
+  } else if (name === "notes") {
+    take("/manage/announcements", (data) => { announcements.value = data; });
+  } else if (name === "ads") {
+    take("/manage/ads", (data) => { ads.value = data; });
+  } else if (name === "crawl") {
+    take("/manage/crawl/jobs", (data) => { jobs.value = data; });
+    take("/manage/crawl/items", (data) => { items.value = data; });
+    take("/manage/tabs", (data) => { tabs.value = data; });
+    take("/manage/categories", (data) => { categories.value = data; });
+  } else if (name === "users") {
+    take("/manage/users", (data) => { users.value = data; });
+    take("/manage/levels", (data) => { levels.value = data.levels || []; pointsPerLink.value = data.points_per_link || 1; });
+  } else if (name === "levels" || name === "security") {
+    take("/manage/levels", (data) => { levels.value = data.levels || []; pointsPerLink.value = data.points_per_link || 1; });
+  } else if (name === "alerts") {
+    take("/manage/alerts", (data) => { alerts.value = data; });
+    take("/manage/ip-bans", (data) => { ipBans.value = data; });
+  } else if (name === "proxies") {
+    tasks.push(http.get("/manage/proxies").then((res) => apply.push(() => { proxies.value = res.data; })).catch(() => apply.push(() => { proxies.value = { count: 0, sources: 0, items: [], note: "unavailable" }; })));
+  } else if (name === "mail") {
+    take("/manage/mail", (data) => { mailState.value = data; });
   }
-  await loadTrend();
+  if (name !== "alerts") take("/manage/alerts", (data) => { alerts.value = data; });
+  try {
+    await Promise.all(tasks);
+    if (seq !== loadSeq) return;
+    apply.forEach((fn) => fn());
+    if (!linkForm.value.category_id && categories.value[0]) linkForm.value.category_id = categories.value[0].id;
+    if (!catForm.value.tab_id && tabs.value[0]) catForm.value.tab_id = tabs.value[0].id;
+  } catch (err) {
+    if (seq === loadSeq) notice.value = err.response?.data?.detail || tx("加载失败", "Load failed");
+  } finally {
+    if (seq === loadSeq) listLoading.value = false;
+  }
 }
 async function loadTrend() {
   const frame = emptyTrend(grain.value);
@@ -367,7 +422,7 @@ watch(section, (value) => {
   if (window.__crawlPoll) clearInterval(window.__crawlPoll);
   window.__crawlPoll = setInterval(() => {
     if (section.value === "crawl" && jobs.value.some((row) => row.status === "running")) {
-      load();
+      load(true);
       loadLogs();
     }
   }, 3000);
@@ -376,15 +431,15 @@ watch(section, (value) => {
 onMounted(async () => {
   setGate(props.gate);
   try {
-    await http.get("/manage/ping");
-    me.value = (await http.get("/auth/console/me")).data;
+    await http.get("/manage/ping", { timeout: 8000 });
+    me.value = (await http.get("/auth/console/me", { timeout: 8000 })).data;
   } catch (err) {
     if (err.response?.status === 404) {
       missing.value = true;
       router.replace("/");
-    } else if (err.response?.status === 401) {
+    } else if (err.response?.status === 401 || !err.response) {
       needConsole.value = true;
-      error.value = "";
+      error.value = err.response ? "" : tx("后台暂时没有响应，可以稍后再登录。", "The console did not respond. Try signing in again.");
       loadMatch();
     } else {
       ready.value = true;
@@ -616,7 +671,7 @@ function openNew(kind) {
     category: { tab_id: tabs.value[0]?.id || "", slug: "", title_en: "", title_zh: "", sort: 0, visible: true },
     note: { title_en: "", title_zh: "", body_en: "", body_zh: "", image_url: "", popup: noteKind.value === "popup", enabled: true },
     ad: { ...adForm.value, id: null },
-    crawl: { id: null, name: "", list_url: "", category_id: categories.value[0]?.id || "", interval_minutes: 1440 },
+    crawl: { id: null, name: "", keyword: "", list_url: "", category_id: categories.value[0]?.id || "", interval_minutes: 1440 },
     admin: { email: "", password: "" },
     ban: { ip: "" },
   };
@@ -754,6 +809,14 @@ async function saveEditor() {
       if (row.id) await http.put(`/manage/ads/${row.id}`, row);
       else await http.post("/manage/ads", row);
     } else if (kind === "crawl") {
+      if (!(row.keyword || "").trim() && !(row.list_url || "").trim() && !(row.name || "").trim()) {
+        error.value = tx("填写关键词或网址", "Enter a keyword or a URL");
+        return;
+      }
+      if (!row.category_id) {
+        error.value = tx("请选择分类", "Choose a category");
+        return;
+      }
       if (row.id) await http.put(`/manage/crawl/jobs/${row.id}`, row);
       else await http.post("/manage/crawl/jobs", row);
     } else if (kind === "admin") {
@@ -831,6 +894,38 @@ function totpText(row) {
   if (!row.totp_confirmed) return tx("未绑定", "Not bound");
   return row.totp_enabled ? tx("绑定已开启", "Bound, on") : tx("绑定未开启", "Bound, off");
 }
+async function saveMail() {
+  const { data } = await http.put("/manage/mail", mailState.value.settings);
+  mailState.value.settings = data;
+  notice.value = tx("已保存", "Saved");
+}
+async function sendTest() {
+  mailHint.value = tx("正在发送测试邮件…", "Sending the test…");
+  try {
+    const { data } = await http.post("/manage/mail/test", { email: mailTest.value });
+    mailHint.value = data.ok ? tx(`已通过 ${data.channel} 发出，请到邮箱查看。`, `Sent through ${data.channel}. Check the inbox.`) : (data.message || tx("没有发出去", "Not sent"));
+    await load();
+  } catch (err) {
+    mailHint.value = err.response?.data?.detail || tx("发送失败", "Send failed");
+  }
+}
+async function sendMail() {
+  notice.value = tx("正在发送…", "Sending…");
+  const { data } = await http.post("/manage/mail/send", mailForm.value);
+  notice.value = tx(`已处理 ${data.sent || 0} 封`, `Handled ${data.sent || 0}`);
+  await load();
+}
+async function addMailTask() {
+  await http.post("/manage/mail/tasks", mailForm.value);
+  notice.value = tx("已加入定时", "Scheduled");
+  await load();
+}
+async function dropMailTask(id) {
+  confirmDelete(tx("删除这个定时邮件？", "Delete this scheduled mail?"), async () => {
+    await http.delete(`/manage/mail/tasks/${id}`);
+    await load();
+  });
+}
 async function setProxy(user, payload) {
   await http.put(`/manage/users/${user.id}`, payload);
   await load();
@@ -864,7 +959,14 @@ async function setProxy(user, payload) {
       <p v-else-if="error">{{ error }}</p>
     </form>
   </div>
-  <div v-else-if="!ready" class="page">Checking the console address…</div>
+  <div v-else-if="!ready" class="boot">
+    <div class="boot-card">
+      <img src="/logo.svg" alt="" />
+      <strong>NEXA</strong>
+      <i></i>
+      <span>{{ tx("正在进入后台", "Opening the console") }}</span>
+    </div>
+  </div>
   <div v-else class="console-shell">
     <aside class="console-side">
       <a class="console-brand" href="/"><img src="/logo.svg" alt="" />NEXA</a>
@@ -883,12 +985,14 @@ async function setProxy(user, payload) {
         <button class="text-btn" :class="{ on: section === 'proxies' }" @click="section = 'proxies'">{{ tx("代理", "Proxies") }}</button>
         <button class="text-btn" :class="{ on: section === 'levels' }" @click="section = 'levels'">{{ tx("等级", "Levels") }}</button>
         <button class="text-btn" :class="{ on: section === 'security' }" @click="section = 'security'">{{ tx("账号安全", "Security") }}</button>
+        <button class="text-btn" :class="{ on: section === 'mail' }" @click="section = 'mail'">{{ tx("邮件", "Mail") }}</button>
       </nav>
     </aside>
     <div class="console-main">
     <header class="console-top"><strong>{{ sectionTitle }}</strong><em>{{ me.email }}</em></header>
     <div class="admin">
       <section v-if="section === 'overview'" class="form overview">
+        <div v-if="listLoading" class="list-mask"><i></i><span>{{ tx("正在加载", "Loading") }}</span></div>
         <div class="stat-row">
           <div v-for="item in bars" :key="item.name"><b>{{ item.n }}</b><span>{{ item.name }}</span></div>
         </div>
@@ -951,8 +1055,57 @@ async function setProxy(user, payload) {
       </section>
 
       <section v-else class="form list-page">
-        <div v-if="section !== 'security'" class="list-bar">
-          <input v-model="query" :placeholder="tx('搜索当前列表', 'Search this list')" />
+        <div v-if="listLoading" class="list-mask"><i></i><span>{{ tx("正在加载", "Loading") }}</span></div>
+        <div v-if="section !== 'security' && section !== 'mail'" class="list-bar">
+          <div class="filters">
+          <template v-if="section === 'links' || section === 'categories' || section === 'crawl'">
+            <select v-model="listTab" @change="listCat = ''">
+              <option value="">{{ tx("全部栏目", "All tabs") }}</option>
+              <option v-for="tab in tabs" :key="tab.id" :value="tab.id">{{ tab.title_zh || tab.title_en }}</option>
+            </select>
+            <select v-if="section !== 'categories'" v-model="listCat">
+              <option value="">{{ tx("全部分类", "All categories") }}</option>
+              <option v-for="cat in filterCats" :key="cat.id" :value="cat.id">{{ cat.title_zh || cat.title_en }}</option>
+            </select>
+          </template>
+          <select v-if="section === 'links'" v-model="listSource">
+            <option value="">{{ tx("全部来源", "All sources") }}</option>
+            <option value="user">{{ tx("用户提交", "Submitted") }}</option>
+            <option value="admin">{{ tx("系统", "System") }}</option>
+          </select>
+          <select v-if="section === 'structure'" v-model="listStatus">
+            <option value="">{{ tx("全部类型", "All kinds") }}</option>
+            <option value="links">links</option>
+            <option value="home">home</option>
+          </select>
+          <select v-if="section === 'news'" v-model="listStatus">
+            <option value="">{{ tx("全部分类", "All topics") }}</option>
+            <option v-for="name in [...new Set(news.map((row) => row.category).filter(Boolean))]" :key="name" :value="name">{{ name }}</option>
+          </select>
+          <select v-if="section === 'notes' || section === 'ads'" v-model="listStatus">
+            <option value="">{{ tx("全部状态", "All statuses") }}</option>
+            <option value="true">{{ tx("显示", "Shown") }}</option>
+            <option value="false">{{ tx("隐藏", "Hidden") }}</option>
+          </select>
+          <select v-if="section === 'ads'" v-model="listTab">
+            <option value="">{{ tx("全部位置", "All places") }}</option>
+            <option v-for="group in slotGroups" :key="group.page" :value="group.page">{{ group.page }}</option>
+          </select>
+          <select v-if="section === 'crawl' && crawlKind === 'jobs'" v-model="listStatus">
+            <option value="">{{ tx("全部状态", "All statuses") }}</option>
+            <option value="running">{{ tx("采集中", "Running") }}</option>
+            <option value="done">{{ tx("完成", "Done") }}</option>
+            <option value="error">{{ tx("失败", "Failed") }}</option>
+            <option value="stopped">{{ tx("已停止", "Stopped") }}</option>
+          </select>
+          <select v-if="section === 'users' && userKind === 'member'" v-model="listStatus">
+            <option value="">{{ tx("全部套餐", "All plans") }}</option>
+            <option value="free">{{ tx("免费", "Free") }}</option>
+            <option value="vip">VIP</option>
+          </select>
+          <input v-if="section !== 'categories' && section !== 'levels' && section !== 'ads'" v-model="query" :placeholder="section === 'users' ? tx('搜索邮箱或 IP', 'Search email or IP') : section === 'proxies' ? tx('搜索代理地址', 'Search proxy') : tx('搜索名称或地址', 'Search name or URL')" />
+          </div>
+          <div class="actions">
           <button v-if="section === 'links'" class="primary" type="button" @click="openNew('link')">{{ tx("新增", "Add") }}</button>
           <button v-if="section === 'structure'" class="primary" type="button" @click="openNew('tab')">{{ tx("新增栏目", "Add tab") }}</button>
           <button v-if="section === 'structure'" type="button" @click="section = 'categories'">{{ tx("分类列表", "Categories") }}</button>
@@ -987,6 +1140,7 @@ async function setProxy(user, payload) {
           <button v-if="section === 'news'" type="button" :disabled="!picked.length" @click="removeIds('/manage/news', picked)">{{ tx("批量删除", "Delete selected") }}</button>
           <button v-if="section === 'notes'" type="button" :disabled="!picked.length" @click="removeIds('/manage/announcements', picked)">{{ tx("批量删除", "Delete selected") }}</button>
           <span v-if="notice">{{ notice }}</span>
+          </div>
         </div>
         <p v-if="section === 'levels'">{{ tx("积分门槛和每分钟代理次数可以改。等级本身固定为 0 到 10。", "Point thresholds and proxy limits can be edited. Levels stay 0 to 10.") }}</p>
         <p v-if="section === 'proxies'">{{ proxies.note || tx("每 3 分钟检测一次，打不开的代理会删掉。", "Checked every 3 minutes. Unusable proxies are removed.") }}</p>
@@ -1032,6 +1186,52 @@ async function setProxy(user, payload) {
             <button class="primary" type="button" @click="savePointRule">{{ tx("保存积分规则", "Save point rule") }}</button>
           </article>
           <p v-if="error" class="security-error">{{ error === "invalid code" ? tx("验证码不正确，还没有绑定成功。", "That code is not valid, so nothing was changed.") : error }}</p>
+        </div>
+
+        <div v-else-if="section === 'mail'" class="security-page mail-page">
+          <article class="security-card">
+            <header><h3>{{ tx("测试配置", "Test") }}</h3></header>
+            <p>{{ tx("填一个收件邮箱，发送一封固定的测试信。成功说明当前打开的通道可用。", "Send one fixed test message. A success means the open channel works.") }}</p>
+            <div class="bind-row">
+              <input v-model="mailTest" type="email" :placeholder="tx('测试收件邮箱', 'Test inbox')" />
+              <button class="primary" type="button" @click="sendTest">{{ tx("发送测试邮件", "Send test") }}</button>
+            </div>
+            <p v-if="mailHint">{{ mailHint }}</p>
+          </article>
+          <article class="security-card">
+            <header><h3>{{ tx("发信通道", "Channels") }}</h3></header>
+            <p>{{ tx("先 Gmail，失败后再 163。账号写在服务器配置里。", "Gmail first, then 163. Accounts stay in the server config.") }}</p>
+            <label class="switch"><input type="checkbox" v-model="mailState.settings.gmail_enabled" @change="saveMail" /><i></i><span>Gmail · {{ mailState.settings.gmail_ready ? tx("已配置", "ready") : tx("未配置", "not set") }}</span></label>
+            <label class="switch"><input type="checkbox" v-model="mailState.settings.netease_enabled" @change="saveMail" /><i></i><span>163 · {{ mailState.settings.netease_ready ? tx("已配置", "ready") : tx("未配置", "not set") }}</span></label>
+            <label class="switch"><input type="checkbox" v-model="mailState.settings.sendgrid_enabled" @change="saveMail" /><i></i><span>SendGrid · {{ mailState.settings.sendgrid_ready ? tx("已配置", "ready") : tx("未配置", "not set") }}</span></label>
+            <label class="switch"><input type="checkbox" v-model="mailState.settings.mailgun_enabled" @change="saveMail" /><i></i><span>Mailgun · {{ mailState.settings.mailgun_ready ? tx("已配置", "ready") : tx("未配置", "not set") }}</span></label>
+            <label class="switch"><input type="checkbox" v-model="mailState.settings.notify_default" @change="saveMail" /><i></i><span>{{ tx("默认通知邮件", "Default notices") }}</span></label>
+          </article>
+          <article class="security-card">
+            <header><h3>{{ tx("给用户发信", "Send") }}</h3></header>
+            <input v-model="mailForm.subject" :placeholder="tx('标题', 'Subject')" />
+            <textarea v-model="mailForm.body" rows="4" :placeholder="tx('正文', 'Message')"></textarea>
+            <input v-model="mailForm.email" type="email" :placeholder="tx('单个邮箱，留空则群发', 'One address, or leave empty for the group')" />
+            <select v-model="mailForm.audience">
+              <option value="all">{{ tx("全部会员", "All members") }}</option>
+              <option value="vip">VIP</option>
+              <option value="free">{{ tx("免费会员", "Free members") }}</option>
+            </select>
+            <button class="primary" type="button" @click="sendMail">{{ tx("立即发送", "Send now") }}</button>
+          </article>
+          <article class="security-card">
+            <header><h3>{{ tx("定时发送", "Schedule") }}</h3></header>
+            <input v-model="mailForm.run_at" type="datetime-local" />
+            <input v-model.number="mailForm.interval_minutes" type="number" min="0" :placeholder="tx('重复间隔（分钟），0 为只发一次', 'Repeat minutes, 0 sends once')" />
+            <button type="button" @click="addMailTask">{{ tx("加入定时", "Schedule") }}</button>
+            <p v-for="task in mailState.tasks" :key="task.id">{{ task.subject }} · {{ (task.run_at || "").replace("T", " ").slice(0, 16) }} <button type="button" @click="dropMailTask(task.id)">{{ tx("删除", "Delete") }}</button></p>
+            <p v-if="!mailState.tasks.length">{{ tx("还没有定时任务", "No schedule yet") }}</p>
+          </article>
+          <article class="security-card">
+            <header><h3>{{ tx("最近记录", "Recent") }}</h3></header>
+            <p v-for="line in mailState.logs" :key="line.id">{{ (line.created_at || "").slice(0, 16).replace("T", " ") }} {{ line.recipient }} · {{ line.channel }} · {{ line.status }} {{ line.message }}</p>
+            <p v-if="!mailState.logs.length">{{ tx("还没有发送记录", "No messages yet") }}</p>
+          </article>
         </div>
 
         <div v-else :class="{ 'crawl-split': section === 'crawl' }">
@@ -1134,7 +1334,7 @@ async function setProxy(user, payload) {
                 </template>
                 <template v-else-if="section === 'crawl' && crawlKind === 'jobs'">
                   <td>{{ row.name }}</td>
-                  <td class="clip">{{ row.list_url }}</td>
+                  <td class="clip">{{ row.list_url || row.keyword || tx("全网", "Web") }}</td>
                   <td>{{ row.category }}</td>
                   <td><span class="tag" :class="{ on: row.status === 'running' || row.status === 'done', warn: row.status === 'error' }" :title="row.message || ''">{{ crawlStatus(row) }}</span></td>
                   <td class="time">{{ (row.last_run_at || "").slice(0, 16).replace("T", " ") }}</td>
@@ -1232,7 +1432,7 @@ async function setProxy(user, payload) {
         </div>
       </section>
 
-      <div v-if="ask" class="console-modal" @click.self="ask = null">
+      <div v-if="ask" class="console-modal">
         <form class="dialog ask" @submit.prevent="acceptAsk">
           <header><h3>{{ tx("确认删除", "Confirm delete") }}</h3><button class="dialog-x" type="button" @click="ask = null">×</button></header>
           <div class="dialog-body"><p>{{ ask.text }}</p></div>
@@ -1242,6 +1442,7 @@ async function setProxy(user, payload) {
           </footer>
         </form>
       </div>
+      <div v-if="editor" class="console-modal">
         <form class="dialog" @submit.prevent="saveEditor">
           <header>
             <h3>{{ editorTitle }}</h3>
@@ -1341,8 +1542,10 @@ async function setProxy(user, payload) {
               <label class="field choice"><span>{{ tx("占位图", "Placeholder") }}</span><input type="checkbox" v-model="editor.row.show_placeholder" /></label>
             </template>
             <template v-else-if="editor.kind === 'crawl'">
-              <label class="field"><span>{{ tx("名称", "Name") }}</span><input v-model="editor.row.name" required /></label>
-              <label class="field wide"><span>{{ tx("列表地址", "List URL") }}</span><input v-model="editor.row.list_url" placeholder="https://" required /></label>
+              <label class="field"><span>{{ tx("名称", "Name") }}</span><input v-model="editor.row.name" :placeholder="tx('任务名称', 'Job name')" /></label>
+              <label class="field"><span>{{ tx("关键词", "Keyword") }}</span><input v-model="editor.row.keyword" :placeholder="tx('例如 美女', 'For example, design tools')" /></label>
+              <label class="field wide"><span>{{ tx("指定网址", "Specific URL") }}</span><input v-model="editor.row.list_url" placeholder="https://" /></label>
+              <p class="field wide slot-lock">{{ tx("填写网址就只采这个页面。留空则按关键词从全网搜索站点入库。", "A URL crawls that page only. Leave it empty to search the web for the keyword.") }}</p>
               <div class="field pick">
                 <span>{{ tx("栏目", "Tab") }}</span>
                 <input v-model="tabQuery" :placeholder="tx('输入栏目名称', 'Type a tab')" @focus="pickOpen = 'tab'" @input="pickOpen = 'tab'" />

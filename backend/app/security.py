@@ -65,6 +65,29 @@ def mark_totp(token: str) -> None:
     rds.setex(f"session:{token}", 60 * 60 * 12, f"{data['user_id']}|{data['role']}|1")
 
 
+def client_ip(request) -> str:
+    peer = (request.client.host if request.client else "") or ""
+    if peer in {"127.0.0.1", "::1"}:
+        forwarded = request.headers.get("x-forwarded-for", "")
+        if forwarded:
+            return forwarded.split(",")[0].strip()[:64]
+    return peer[:64]
+
+
+def checked_image(raw: bytes) -> str:
+    if not raw or len(raw) > 2 * 1024 * 1024:
+        raise ValueError("image required")
+    if raw.startswith(b"\x89PNG\r\n\x1a\n"):
+        return ".png"
+    if raw.startswith(b"\xff\xd8\xff"):
+        return ".jpg"
+    if raw.startswith((b"GIF87a", b"GIF89a")):
+        return ".gif"
+    if raw.startswith(b"RIFF") and raw[8:12] == b"WEBP":
+        return ".webp"
+    raise ValueError("image required")
+
+
 def rate_limit(key: str, limit: int, window: int) -> bool:
     count = rds.incr(key)
     if count == 1:

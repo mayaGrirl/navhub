@@ -6,6 +6,7 @@ import http from "../api";
 const props = defineProps({ pageKey: String });
 const { locale } = useI18n();
 const page = ref(null);
+const loading = ref(true);
 const ads = ref([]);
 const slots = {
   about: ["about-1", "about-2", "about-3"],
@@ -13,13 +14,19 @@ const slots = {
 };
 
 async function load() {
-  const [{ data }, adRes] = await Promise.all([
-    http.get(`/pages/${props.pageKey}`, { params: { locale: locale.value } }),
-    http.get("/ads", { params: { locale: locale.value } }),
-  ]);
-  page.value = data;
-  const wanted = slots[props.pageKey] || [];
-  ads.value = adRes.data.filter((item) => wanted.includes(item.slot));
+  loading.value = true;
+  try {
+    const [{ data }, adRes] = await Promise.all([
+      http.get(`/pages/${props.pageKey}`, { params: { locale: locale.value } }),
+      http.get("/ads", { params: { locale: locale.value } }),
+    ]);
+    page.value = data;
+    document.title = `${data.title} — NEXA`;
+    const wanted = slots[props.pageKey] || [];
+    ads.value = adRes.data.filter((item) => wanted.includes(item.slot));
+  } finally {
+    loading.value = false;
+  }
 }
 
 watch(locale, load);
@@ -27,7 +34,10 @@ onMounted(load);
 </script>
 
 <template>
-  <div class="doc" v-if="page">
+  <div v-if="loading" class="doc skeleton" aria-busy="true">
+    <article class="page"><i class="bone"></i><i class="bone tall"></i></article>
+  </div>
+  <div class="doc" v-else-if="page">
     <article class="page">
       <a class="brand" href="/"><img src="/logo.svg" alt="" />NEXA</a>
       <h1>{{ page.title }}</h1>

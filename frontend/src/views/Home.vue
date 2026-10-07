@@ -6,6 +6,7 @@ import http from "../api";
 
 const route = useRoute();
 const { t, locale } = useI18n();
+const homeReady = ref(false);
 const tabs = ref([]);
 const tabId = ref(null);
 const sections = ref([]);
@@ -409,6 +410,7 @@ function applyHome(data) {
   growthRanks.value = data.github?.growth || [];
   totalRanks.value = data.github?.total || [];
   period.value = "past_24_hours";
+  homeReady.value = true;
 }
 
 async function loadHome() {
@@ -443,7 +445,7 @@ onMounted(async () => {
   try {
     applyHome((await home).data);
   } catch {
-    /* keep the shell usable if the bundle fails */
+    homeReady.value = true;
   }
   if (route.query.link) {
     await focusHit({
@@ -541,7 +543,7 @@ onUnmounted(() => {
             target="_blank"
             rel="noopener"
           >
-            <img v-if="ad.image_url" :src="ad.image_url" :alt="ad.title" loading="lazy" decoding="async" />
+            <img v-if="ad.image_url" :src="ad.image_url" :alt="ad.title" :loading="index ? 'lazy' : 'eager'" decoding="async" />
             <b v-if="placeholder(ad)" class="ad-no">{{ ad.no }}</b>
             <span>{{ ad.title }}</span>
           </a>
@@ -553,12 +555,17 @@ onUnmounted(() => {
     </section>
 
     <a v-if="stripAds.length" class="strip-ad" :href="stripAds[0].link_url || undefined" target="_blank" rel="noopener">
-      <img v-if="stripAds[0].image_url" :src="stripAds[0].image_url" :alt="stripAds[0].title" />
+      <img v-if="stripAds[0].image_url" :src="stripAds[0].image_url" :alt="stripAds[0].title" loading="lazy" decoding="async" />
       <b v-if="placeholder(stripAds[0])" class="ad-no">{{ stripAds[0].no }}</b>
       <span v-else>{{ stripAds[0].title }}</span>
     </a>
 
-    <div class="portal">
+    <div v-if="!homeReady" class="portal skeleton" aria-busy="true" aria-label="loading">
+      <aside class="panel"><i class="bone"></i><i class="bone"></i><i class="bone"></i><i class="bone"></i></aside>
+      <main class="panel"><i class="bone tall"></i><i class="bone"></i><i class="bone"></i><i class="bone"></i></main>
+      <aside class="panel"><i class="bone"></i><i class="bone tall"></i></aside>
+    </div>
+    <div v-else class="portal">
       <aside class="panel side-jump">
         <template v-if="isHome">
           <p class="side-label">{{ locale === "zh" ? "资讯" : "News" }}</p>

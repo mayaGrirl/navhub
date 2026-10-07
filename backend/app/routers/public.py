@@ -14,16 +14,13 @@ from app.config import settings
 from app.deps import db_session, require_user
 from app.models import Ad, Announcement, Category, IpBan, Level, Link, LinkMark, NewsItem, Page, PointRule, Tab, User
 from app.urls import norm_url
-from app.security import month_key, plan_active, quota_for, rate_limit, rds
+from app.security import client_ip, month_key, plan_active, quota_for, rate_limit, rds, checked_image
 
 router = APIRouter(prefix="/api", tags=["public"])
 
 
 def _client_ip(request: Request) -> str:
-    forwarded = request.headers.get("x-forwarded-for", "")
-    if forwarded:
-        return forwarded.split(",")[0].strip()[:64]
-    return (request.client.host if request.client else "")[:64]
+    return client_ip(request)
 
 
 def _t(locale: str, en: str, zh: str) -> str:
@@ -431,14 +428,11 @@ def github(period: str = "past_24_hours"):
 
 @router.post("/uploads")
 async def upload_logo(file: UploadFile = File(...), user: User = Depends(require_user)):
-    if not (file.content_type or "").startswith("image/"):
-        raise HTTPException(status_code=400, detail="image required")
     raw = await file.read()
-    if not raw or len(raw) > 2 * 1024 * 1024:
-        raise HTTPException(status_code=400, detail="image required")
-    suffix = Path(file.filename or "").suffix.lower()
-    if suffix not in {".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"}:
-        suffix = ".png"
+    try:
+        suffix = checked_image(raw)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="image required") from exc
     folder = Path(__file__).resolve().parents[3] / "frontend" / "public" / "uploads"
     folder.mkdir(parents=True, exist_ok=True)
     name = f"{uuid.uuid4().hex}{suffix}"

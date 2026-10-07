@@ -118,6 +118,7 @@ async def lifespan(_app: FastAPI):
             "ALTER TABLE crawl_jobs ADD COLUMN status VARCHAR(20) NOT NULL DEFAULT 'idle'",
             "ALTER TABLE crawl_jobs ADD COLUMN message VARCHAR(500) NOT NULL DEFAULT ''",
             "ALTER TABLE crawl_jobs ADD COLUMN found_count INT NOT NULL DEFAULT 0",
+            "ALTER TABLE crawl_jobs ADD COLUMN keyword VARCHAR(120) NOT NULL DEFAULT ''",
             "CREATE TABLE IF NOT EXISTS crawl_logs (id INT PRIMARY KEY AUTO_INCREMENT, job_id INT NOT NULL, message VARCHAR(500) NOT NULL DEFAULT '', created_at DATETIME NULL, INDEX ix_crawl_logs_job (job_id))",
         ):
             try:
@@ -152,6 +153,8 @@ async def lifespan(_app: FastAPI):
     schedule_daily()
     schedule_news()
     schedule_jobs()
+    from app.mailer import schedule_mail
+    schedule_mail()
     schedule_directory()
     from app.review import sweep_open
 
@@ -159,7 +162,7 @@ async def lifespan(_app: FastAPI):
     yield
 
 
-app = FastAPI(title="Nav API", lifespan=lifespan)
+app = FastAPI(title="Nav API", lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
 app.add_middleware(GZipMiddleware, minimum_size=800)
 app.add_middleware(
     CORSMiddleware,
@@ -186,7 +189,13 @@ async def anti_scrape(request, call_next):
         token = request.cookies.get("nav_pass")
         if not token or not rds.get(f"pass:{token}"):
             return JSONResponse({"detail": "guard"}, status_code=403)
-    return await call_next(request)
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+    response.headers["X-XSS-Protection"] = "0"
+    return response
 
 
 app.include_router(public.router)

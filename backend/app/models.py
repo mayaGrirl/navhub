@@ -216,7 +216,8 @@ class CrawlJob(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str] = mapped_column(String(120))
-    list_url: Mapped[str] = mapped_column(String(500))
+    list_url: Mapped[str] = mapped_column(String(500), default="")
+    keyword: Mapped[str] = mapped_column(String(120), default="")
     category_id: Mapped[int] = mapped_column(ForeignKey("categories.id"))
     interval_minutes: Mapped[int] = mapped_column(Integer, default=1440)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
@@ -246,4 +247,42 @@ class CrawlItem(Base):
     description: Mapped[str] = mapped_column(Text, default="")
     logo_url: Mapped[str] = mapped_column(String(500), default="")
     status: Mapped[str] = mapped_column(String(20), default="pending")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class MailSetting(Base):
+    __tablename__ = "mail_settings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    gmail_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    netease_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    sendgrid_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    mailgun_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    ses_enabled: Mapped[bool] = mapped_column(Boolean, default=False)
+    notify_default: Mapped[bool] = mapped_column(Boolean, default=False)
+    money_dm: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
+class MailTask(Base):
+    __tablename__ = "mail_tasks"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    subject: Mapped[str] = mapped_column(String(200))
+    body: Mapped[str] = mapped_column(Text, default="")
+    audience: Mapped[str] = mapped_column(String(20), default="all")
+    run_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    interval_minutes: Mapped[int] = mapped_column(Integer, default=0)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    last_run_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class MailLog(Base):
+    __tablename__ = "mail_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    recipient: Mapped[str] = mapped_column(String(200), default="")
+    subject: Mapped[str] = mapped_column(String(200), default="")
+    channel: Mapped[str] = mapped_column(String(20), default="log")
+    status: Mapped[str] = mapped_column(String(20), default="logged")
+    message: Mapped[str] = mapped_column(String(500), default="")
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)

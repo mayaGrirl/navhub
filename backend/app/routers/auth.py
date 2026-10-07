@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.deps import db_session, require_user
 from app.models import AuthLog, IpBan, User
 from app.security import (
+    client_ip,
     check_totp,
     clear_failure,
     drop_session,
@@ -80,10 +81,7 @@ def _email(value: str) -> str:
 
 
 def _ip(request: Request) -> str:
-    forwarded = request.headers.get("x-forwarded-for", "")
-    if forwarded:
-        return forwarded.split(",")[0].strip()[:64]
-    return (request.client.host if request.client else "")[:64]
+    return client_ip(request)
 
 
 @router.post("/register")
