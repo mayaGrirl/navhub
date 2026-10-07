@@ -433,11 +433,14 @@ onMounted(async () => {
   try {
     await http.get("/manage/ping", { timeout: 8000 });
     me.value = (await http.get("/auth/console/me", { timeout: 8000 })).data;
+    ready.value = true;
+    await load();
   } catch (err) {
-    if (err.response?.status === 404) {
+    const status = err.response?.status;
+    if (status === 404) {
       missing.value = true;
       router.replace("/");
-    } else if (err.response?.status === 401 || !err.response) {
+    } else if (status === 401 || status === 403 || !err.response) {
       needConsole.value = true;
       error.value = err.response ? "" : tx("后台暂时没有响应，可以稍后再登录。", "The console did not respond. Try signing in again.");
       loadMatch();
@@ -445,13 +448,6 @@ onMounted(async () => {
       ready.value = true;
       error.value = err.response?.data?.detail || "load failed";
     }
-    return;
-  }
-  ready.value = true;
-  try {
-    await load();
-  } catch (err) {
-    error.value = err.response?.data?.detail || "load failed";
   }
 });
 

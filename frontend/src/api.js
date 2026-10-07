@@ -1,7 +1,7 @@
 import axios from "axios";
 
 const http = axios.create({ baseURL: "/api", withCredentials: true });
-const guardReady = axios.get("/api/guard", { withCredentials: true }).catch(() => null);
+const guardReady = axios.get("/api/guard", { withCredentials: true, timeout: 8000 }).catch(() => null);
 http.interceptors.request.use(async (config) => {
   if (!String(config.url || "").includes("guard")) await guardReady;
   return config;
