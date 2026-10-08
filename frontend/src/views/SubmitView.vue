@@ -162,7 +162,7 @@ async function uploadLogo(event) {
   const file = event.target.files?.[0];
   event.target.value = "";
   if (!file) return;
-  const ok = ["image/png", "image/jpeg", "image/gif", "image/webp", "image/svg+xml"].includes(file.type) || /\.(png|jpe?g|gif|webp|svg)$/i.test(file.name);
+  const ok = ["image/png", "image/jpeg", "image/gif", "image/webp"].includes(file.type) || /\.(png|jpe?g|gif|webp)$/i.test(file.name);
   if (!ok) {
     notice.value = t("imageFormatsOnly");
     return;
@@ -356,7 +356,7 @@ async function logout() {
       <div class="logo-row">
         <img v-if="logoPreview || logoUrl" :src="logoPreview || logoUrl" alt="" />
         <input v-model="logoUrl" :placeholder="t('logoUrl')" @input="onLogoTyping" />
-        <label class="upload-btn">{{ t("uploadIcon") }}<input type="file" accept=".png,.jpg,.jpeg,.gif,.webp,.svg,image/png,image/jpeg,image/gif,image/webp,image/svg+xml" @change="uploadLogo" /></label>
+        <label class="upload-btn">{{ t("uploadIcon") }}<input type="file" accept=".png,.jpg,.jpeg,.gif,.webp,image/png,image/jpeg,image/gif,image/webp" @change="uploadLogo" /></label>
       </div>
       <p class="meta">{{ t("imageFormats") }}</p>
       <textarea v-model="description" rows="4" :placeholder="t('linkDesc')"></textarea>

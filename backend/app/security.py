@@ -90,7 +90,7 @@ def checked_image(raw: bytes) -> str:
 
 def rate_limit(key: str, limit: int, window: int) -> bool:
     count = rds.incr(key)
-    if count == 1:
+    if count == 1 or rds.ttl(key) < 0:
         rds.expire(key, window)
     return count <= limit
 

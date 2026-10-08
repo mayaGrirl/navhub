@@ -149,12 +149,20 @@ async def lifespan(_app: FastAPI):
             conn.execute(text("UPDATE crawl_jobs SET status = 'stopped' WHERE status = 'running'"))
         except Exception:
             pass
+        try:
+            conn.execute(text(
+                "DELETE m1 FROM link_marks m1 INNER JOIN link_marks m2 "
+                "ON m1.user_id = m2.user_id AND m1.link_id = m2.link_id AND m1.kind = m2.kind AND m1.id > m2.id"
+            ))
+        except Exception:
+            pass
         for statement in (
             "CREATE INDEX ix_news_pub ON news_items (published_at, category, id)",
             "CREATE INDEX ix_links_cat ON links (category_id, status, sort, id)",
             "CREATE INDEX ix_links_fav ON links (status, favorite_count)",
             "CREATE INDEX ix_links_rec ON links (status, recommend_count)",
             "CREATE INDEX ix_links_clk ON links (status, click_count)",
+            "CREATE UNIQUE INDEX ux_link_marks ON link_marks (user_id, link_id, kind)",
         ):
             try:
                 conn.execute(text(statement))

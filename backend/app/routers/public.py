@@ -8,7 +8,8 @@ import secrets
 import httpx
 from fastapi import APIRouter, Depends, File, Header, HTTPException, Query, Request, Response, UploadFile
 from sqlalchemy import func, or_, select
-from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session, selectinload
 
 from app.config import settings
 from app.deps import db_session, require_user
@@ -27,6 +28,22 @@ def _t(locale: str, en: str, zh: str) -> str:
     return zh if locale == "zh" else en
 
 
+def _like(query: str) -> str:
+    escaped = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    return f"%{escaped}%"
+
+
+def drop_public_cache() -> None:
+    for pattern in ("home:*", "board:*"):
+        cursor = 0
+        while True:
+            cursor, keys = rds.scan(cursor=cursor, match=pattern, count=200)
+            if keys:
+                rds.delete(*keys)
+            if cursor == 0:
+                break
+
+
 @router.get("/guard")
 def guard(response: Response):
     token = secrets.token_urlsafe(24)
@@ -37,12 +54,12 @@ def guard(response: Response):
 
 @router.get("/tree")
 def tree(locale: str = "en", db: Session = Depends(db_session)):
-    tabs = db.scalars(select(Tab).where(Tab.visible.is_(True)).order_by(Tab.sort.desc(), Tab.id)).all()
+    tabs = db.scalars(
+        select(Tab).where(Tab.visible.is_(True)).options(selectinload(Tab.categories)).order_by(Tab.sort.desc(), Tab.id)
+    ).unique().all()
     payload = []
     for tab in tabs:
-        categories = db.scalars(
-            select(Category).where(Category.tab_id == tab.id, Category.visible.is_(True)).order_by(Category.sort, Category.id)
-        ).all()
+        categories = sorted((c for c in tab.categories if c.visible), key=lambda c: (c.sort, c.id))
         payload.append(
             {
                 "id": tab.id,
@@ -63,7 +80,7 @@ def search(q: str = "", locale: str = "en", db: Session = Depends(db_session)):
     query = q.strip()
     if not query:
         return []
-    like = f"%{query}%"
+    like = _like(query)
     rows = db.execute(
         select(Link, Category, Tab)
         .join(Category, Link.category_id == Category.id)
@@ -73,11 +90,11 @@ def search(q: str = "", locale: str = "en", db: Session = Depends(db_session)):
             Tab.visible.is_(True),
             Category.visible.is_(True),
             or_(
-                Link.title_zh.like(like),
-                Link.title_en.like(like),
-                Link.url.like(like),
-                Link.description_zh.like(like),
-                Link.description_en.like(like),
+                Link.title_zh.like(like, escape="\\"),
+                Link.title_en.like(like, escape="\\"),
+                Link.url.like(like, escape="\\"),
+                Link.description_zh.like(like, escape="\\"),
+                Link.description_en.like(like, escape="\\"),
             ),
         )
         .limit(20)
@@ -295,18 +312,22 @@ def mark_link(link_id: int, payload: dict, user: User = Depends(require_user), d
         db.add(LinkMark(user_id=user.id, link_id=link_id, kind=kind))
         setattr(link, field, (getattr(link, field) or 0) + 1)
         on = True
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="already marked")
+    drop_public_cache()
     return {"on": on, "favorite_count": link.favorite_count or 0, "recommend_count": link.recommend_count or 0}
 
 
 @router.get("/me/marks")
 def my_marks(locale: str = "en", user: User = Depends(require_user), db: Session = Depends(db_session)):
-    rows = db.scalars(select(LinkMark).where(LinkMark.user_id == user.id)).all()
+    rows = db.execute(
+        select(LinkMark, Link).join(Link, Link.id == LinkMark.link_id).where(LinkMark.user_id == user.id)
+    ).all()
     items = []
-    for mark in rows:
-        link = db.get(Link, mark.link_id)
-        if not link:
-            continue
+    for mark, link in rows:
         items.append({"id": link.id, "kind": mark.kind, "title": _t(locale, link.title_en, link.title_zh), "url": link.url, "logo_url": link.logo_url, "favorite_count": link.favorite_count or 0, "recommend_count": link.recommend_count or 0})
     return {"items": items}
 
@@ -344,13 +365,16 @@ def ranks(locale: str = "en", db: Session = Depends(db_session)):
 
 
 @router.post("/links/{link_id}/click")
-def count_click(link_id: int, db: Session = Depends(db_session)):
+def count_click(link_id: int, request: Request, db: Session = Depends(db_session)):
     link = db.get(Link, link_id)
     if not link or link.status != "published":
         raise HTTPException(status_code=404, detail="not found")
+    if not rate_limit(f"clk:{_client_ip(request)}:{link_id}", 1, 30):
+        return {"click_count": link.click_count or 0}
     link.click_count = (link.click_count or 0) + 1
     link.clicks_ready = True
     db.commit()
+    drop_public_cache()
     return {"click_count": link.click_count}
 
 
