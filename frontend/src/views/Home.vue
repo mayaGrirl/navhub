@@ -304,6 +304,22 @@ function noteImage(note) {
 }
 const tickerNotes = computed(() => notes.value.length > 3 ? notes.value.concat(notes.value) : notes.value);
 
+function newsText(raw) {
+  const named = { nbsp: " ", amp: "&", lt: "<", gt: ">", quot: '"', apos: "'" };
+  const text = String(raw || "")
+    .replace(/<[^>]*>?/g, " ")
+    .replace(/&(#x?[0-9a-f]+|[a-z]+);/gi, (entity, body) => {
+      if (body[0] === "#") {
+        const code = body[1] === "x" || body[1] === "X" ? parseInt(body.slice(2), 16) : parseInt(body.slice(1), 10);
+        return Number.isFinite(code) ? String.fromCodePoint(code) : " ";
+      }
+      return named[body.toLowerCase()] ?? " ";
+    })
+    .replace(/\s+/g, " ")
+    .trim();
+  return text.slice(0, 140);
+}
+
 function siteIcon(url) {
   try {
     const host = new URL(url).hostname;
@@ -642,7 +658,7 @@ onUnmounted(() => {
             <a class="story" v-for="item in group.items" :key="item.id" :href="item.url" target="_blank" rel="noreferrer">
               <h3>{{ item.title }}</h3>
               <p class="meta">{{ item.source }}<span v-if="item.published_at"> · {{ item.published_at.slice(0, 16).replace("T", " ") }}</span></p>
-              <p v-if="item.summary">{{ item.summary.replace(/<[^>]+>/g, "").slice(0, 140) }}</p>
+              <p v-if="newsText(item.summary)">{{ newsText(item.summary) }}</p>
             </a>
           </section>
           <a v-if="feedAdAt(index)" class="feed-ad" :href="feedAdAt(index).link_url || undefined" target="_blank" rel="noopener">

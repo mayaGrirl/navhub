@@ -1,3 +1,5 @@
+import html
+import re
 import threading
 import time
 import xml.etree.ElementTree as ET
@@ -9,6 +11,16 @@ from sqlalchemy import delete, inspect, select, text
 
 from app.db import Base, SessionLocal, engine
 from app.models import Announcement, NewsItem
+
+_TAG = re.compile(r"<[^>]*>?")
+
+
+def plain_text(value: str) -> str:
+    text = html.unescape(value or "")
+    text = _TAG.sub(" ", text)
+    text = html.unescape(text)
+    return re.sub(r"\s+", " ", text).strip()
+
 
 FEEDS = [
     ("society", "BBC 中文", "https://feeds.bbci.co.uk/zhongwen/simp/rss.xml"),
@@ -175,10 +187,10 @@ def main() -> None:
                 if not link or not title or (category, link) in seen or db.scalar(select(NewsItem).where(NewsItem.url == link, NewsItem.category == category)):
                     continue
                 seen.add((category, link))
-                summary = node_text(item, "description") or node_text(item, f"{ATOM}summary")
+                summary = plain_text(node_text(item, "description") or node_text(item, f"{ATOM}summary"))
                 db.add(
                     NewsItem(
-                        title=title[:300],
+                        title=plain_text(title)[:300],
                         url=link[:500],
                         source=source,
                         category=category,

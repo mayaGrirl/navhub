@@ -193,7 +193,7 @@ def announcements(locale: str = "en", db: Session = Depends(db_session)):
 
 @router.get("/news")
 def news(db: Session = Depends(db_session)):
-    from fetch_news import today_start
+    from fetch_news import plain_text, today_start
 
     rows = db.scalars(
         select(NewsItem).where(NewsItem.published_at >= today_start()).order_by(NewsItem.published_at.desc(), NewsItem.id.desc())
@@ -210,11 +210,11 @@ def news(db: Session = Depends(db_session)):
     return [
         {
             "id": row.id,
-            "title": row.title,
+            "title": plain_text(row.title),
             "url": row.url,
             "source": row.source,
             "category": row.category,
-            "summary": row.summary,
+            "summary": plain_text(row.summary),
             "published_at": row.published_at.isoformat() if row.published_at else None,
         }
         for row in rows
