@@ -18,6 +18,8 @@ from sources import LISTS
 
 
 class Settings(BaseSettings):
+    model_config = {"env_file": ".env", "extra": "ignore"}
+
     database_url: str = "mysql+pymysql://nav:navpass@127.0.0.1:3306/navproxy?charset=utf8mb4"
     token: str = "change-pool-token"
 

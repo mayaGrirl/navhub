@@ -1,4 +1,10 @@
+import os
+import socket
+import subprocess
+import sys
 from contextlib import asynccontextmanager
+from pathlib import Path
+from urllib.parse import urlparse
 
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
@@ -16,6 +22,49 @@ from app.crawl import schedule_jobs
 from fetch_news import schedule_news
 from fill_daily import schedule_directory
 from app.seed import seed
+
+
+def _local_pool_port() -> int | None:
+    raw = (settings.proxy_pool_url or "").strip()
+    if not raw:
+        return None
+    parsed = urlparse(raw)
+    host = (parsed.hostname or "").lower()
+    if host not in {"127.0.0.1", "localhost", "::1"}:
+        return None
+    return parsed.port or (443 if parsed.scheme == "https" else 80)
+
+
+def _port_open(port: int) -> bool:
+    with socket.socket() as sock:
+        sock.settimeout(0.4)
+        return sock.connect_ex(("127.0.0.1", port)) == 0
+
+
+def ensure_proxy_pool() -> None:
+    port = _local_pool_port()
+    if not port or _port_open(port):
+        return
+    root = Path(__file__).resolve().parents[2]
+    log_path = root / ".run" / "pool.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    log = open(log_path, "ab", buffering=0)
+    kwargs = {
+        "cwd": root / "proxy-pool",
+        "stdout": log,
+        "stderr": subprocess.STDOUT,
+        "stdin": subprocess.DEVNULL,
+    }
+    if os.name == "nt":
+        kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS
+    else:
+        kwargs["start_new_session"] = True
+    subprocess.Popen(
+        [sys.executable, "-m", "uvicorn", "app:app", "--host", "127.0.0.1", "--port", str(port)],
+        **kwargs,
+    )
+    log.close()
+    print(f"Proxy pool starting on 127.0.0.1:{port}")
 
 
 @asynccontextmanager
@@ -189,6 +238,7 @@ async def lifespan(_app: FastAPI):
     from app.review import sweep_open
 
     sweep_open()
+    ensure_proxy_pool()
     yield
 
 

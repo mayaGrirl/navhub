@@ -24,6 +24,39 @@ API_URL = f"http://127.0.0.1:{API_PORT}/api/health"
 WEB_URL = f"http://127.0.0.1:{WEB_PORT}/"
 
 
+def pool_port() -> int | None:
+    path = ROOT / "backend" / ".env"
+    if not path.exists():
+        return None
+    raw = ""
+    for line in path.read_text(encoding="utf-8", errors="replace").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        if key.strip() == "PROXY_POOL_URL":
+            raw = value.strip().strip('"').strip("'")
+    if not raw:
+        return None
+    if "://" not in raw:
+        raw = "http://" + raw
+    host = ""
+    rest = raw.split("://", 1)[1]
+    hostport = rest.split("/", 1)[0]
+    if hostport.startswith("["):
+        host = hostport[1:].split("]", 1)[0]
+        port_text = hostport.rsplit(":", 1)[-1] if "]:" in hostport else ""
+    elif ":" in hostport:
+        host, port_text = hostport.rsplit(":", 1)
+    else:
+        host, port_text = hostport, ""
+    if host.lower() not in {"127.0.0.1", "localhost", "::1"}:
+        return None
+    if port_text.isdigit():
+        return int(port_text)
+    return 443 if raw.startswith("https://") else 80
+
+
 def python_bin() -> Path:
     if os.name == "nt":
         return ROOT / "backend" / ".venv" / "Scripts" / "python.exe"
@@ -212,42 +245,68 @@ def start() -> int:
         for item in missing:
             print(" ", item)
         return 1
+    pool = pool_port()
+    pool_ok = True
+    if pool is None:
+        print("pool skipped, PROXY_POOL_URL is empty or not a local address")
+    elif listening_pids(pool):
+        print(f"pool already listening on {pool}")
+    else:
+        spawn("pool", [str(py), "-m", "uvicorn", "app:app", "--host", "127.0.0.1", "--port", str(pool)], ROOT / "proxy-pool")
+        pool_ok = wait_http(f"http://127.0.0.1:{pool}/alive")
     if listening_pids(API_PORT) or listening_pids(WEB_PORT):
-        print("already running; use restart if you want a fresh process")
-        status()
-        return 0
-    spawn("api", [str(py), "-m", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", str(API_PORT)], ROOT / "backend")
-    spawn(
-        "web",
-        [str(vite), "--host", "127.0.0.1", "--port", str(WEB_PORT)],
-        ROOT / "frontend",
-    )
+        print("api and web already running; use restart if you want a fresh process")
+    else:
+        spawn("api", [str(py), "-m", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", str(API_PORT)], ROOT / "backend")
+        spawn(
+            "web",
+            [str(vite), "--host", "127.0.0.1", "--port", str(WEB_PORT)],
+            ROOT / "frontend",
+        )
     api_ok = wait_http(API_URL)
     web_ok = wait_http(WEB_URL)
     print(f"api  {API_URL} {'up' if api_ok else 'not ready'}")
     print(f"web  {WEB_URL} {'up' if web_ok else 'not ready'}")
+    if pool is not None:
+        print(f"pool http://127.0.0.1:{pool}/alive {'up' if pool_ok else 'not ready'}")
     print(f"logs {RUN}")
     if not api_ok:
         print(log_tail("api"))
     if not web_ok:
         print(log_tail("web"))
-    return 0 if api_ok and web_ok else 1
+    if pool is not None and not pool_ok:
+        print(log_tail("pool"))
+    return 0 if api_ok and web_ok and pool_ok else 1
 
 
 def stop() -> int:
     stop_service("api", API_PORT)
     stop_service("web", WEB_PORT)
+    pool = pool_port()
+    if pool:
+        stop_service("pool", pool)
     print(f"api  port {API_PORT} {'still listening' if listening_pids(API_PORT) else 'stopped'}")
     print(f"web  port {WEB_PORT} {'still listening' if listening_pids(WEB_PORT) else 'stopped'}")
-    return 0 if not listening_pids(API_PORT) and not listening_pids(WEB_PORT) else 1
+    if pool:
+        print(f"pool port {pool} {'still listening' if listening_pids(pool) else 'stopped'}")
+    else:
+        print("pool skipped")
+    busy = listening_pids(API_PORT) or listening_pids(WEB_PORT) or (pool and listening_pids(pool))
+    return 1 if busy else 0
 
 
 def status() -> int:
-    for name, port, url in (("api", API_PORT, API_URL), ("web", WEB_PORT, WEB_URL)):
+    rows = [("api", API_PORT, API_URL), ("web", WEB_PORT, WEB_URL)]
+    pool = pool_port()
+    if pool:
+        rows.append(("pool", pool, f"http://127.0.0.1:{pool}/alive"))
+    for name, port, url in rows:
         pids = listening_pids(port)
         state = "up" if pids and port_open(port) else "down"
         shown = ",".join(str(pid) for pid in pids) or "-"
         print(f"{name:4} {state:4} port {port} pid {shown} {url}")
+    if not pool:
+        print("pool skip PROXY_POOL_URL is empty or not local")
     return 0
 
 
