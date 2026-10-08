@@ -116,6 +116,18 @@ async def lifespan(_app: FastAPI):
         except Exception:
             pass
         try:
+            conn.execute(text("ALTER TABLE links ADD COLUMN real_favorite_count INT NOT NULL DEFAULT 0"))
+        except Exception:
+            pass
+        try:
+            conn.execute(text("ALTER TABLE links ADD COLUMN real_recommend_count INT NOT NULL DEFAULT 0"))
+        except Exception:
+            pass
+        try:
+            conn.execute(text("ALTER TABLE links ADD COLUMN real_click_count INT NOT NULL DEFAULT 0"))
+        except Exception:
+            pass
+        try:
             conn.execute(text("ALTER TABLE links ADD COLUMN clicks_ready TINYINT(1) NOT NULL DEFAULT 0"))
         except Exception:
             pass

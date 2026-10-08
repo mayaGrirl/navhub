@@ -168,6 +168,7 @@ const adView = computed(() => {
       const where = `${item.page} · ${item.where}`;
       rows.push({
         ...row,
+        where,
         page: item.page,
         no: index + 1,
         carousel: !!item.carousel,
@@ -1631,7 +1632,7 @@ async function consoleLogout() {
               <tr>
                 <th v-if="section !== 'ads'" class="check"><input type="checkbox" :checked="activeView.rows.length && activeView.rows.every((row) => picked.includes(row.id))" @change="togglePage(activeView.rows, $event.target.checked)" /></th>
                 <template v-if="section === 'links'">
-                  <th>{{ tx("名称", "Name") }}</th><th>{{ tx("地址", "URL") }}</th><th>{{ tx("来源", "Source") }}</th><th>{{ tx("收藏", "Saves") }}</th><th>{{ tx("推荐", "Picks") }}</th><th>{{ tx("点击", "Clicks") }}</th>
+                  <th>{{ tx("名称", "Name") }}</th><th>{{ tx("地址", "URL") }}</th><th>{{ tx("来源", "Source") }}</th><th class="num">{{ tx("展示收藏", "Shown saves") }}</th><th class="num">{{ tx("展示推荐", "Shown picks") }}</th><th class="num">{{ tx("展示点击", "Shown clicks") }}</th><th class="num">{{ tx("真实收藏", "Real saves") }}</th><th class="num">{{ tx("真实推荐", "Real picks") }}</th><th class="num">{{ tx("真实点击", "Real clicks") }}</th>
                 </template>
                 <template v-else-if="section === 'structure'">
                   <th>ID</th><th>slug</th><th>{{ tx("中文名", "Chinese") }}</th><th>{{ tx("英文名", "English") }}</th><th>{{ tx("类型", "Kind") }}</th><th>{{ tx("排序", "Sort") }}</th><th>{{ tx("显示", "Visible") }}</th><th>18+</th><th>{{ tx("全网采集", "Web crawl") }}</th>
@@ -1682,7 +1683,7 @@ async function consoleLogout() {
               <tr v-for="row in activeView.rows" :key="row.id || row.url || row.level">
                 <td v-if="section !== 'ads'" class="check"><input type="checkbox" :checked="picked.includes(row.id)" @change="togglePick(row.id, $event.target.checked)" /></td>
                 <template v-if="section === 'links'">
-                  <td>{{ row.title_zh || row.title_en }}</td><td class="clip">{{ row.url }}</td><td><span class="tag">{{ sourceLabel(row.source) }}</span></td><td class="num">{{ row.favorite_count }}</td><td class="num">{{ row.recommend_count }}</td><td class="num">{{ row.click_count }}</td>
+                  <td>{{ row.title_zh || row.title_en }}</td><td class="clip">{{ row.url }}</td><td><span class="tag">{{ sourceLabel(row.source) }}</span></td><td class="num">{{ row.favorite_count }}</td><td class="num">{{ row.recommend_count }}</td><td class="num">{{ row.click_count }}</td><td class="num">{{ row.real_favorite_count || 0 }}</td><td class="num">{{ row.real_recommend_count || 0 }}</td><td class="num">{{ row.real_click_count || 0 }}</td>
                   <td class="row-actions"><button type="button" @click="openEdit('link', row)">{{ tx("编辑", "Edit") }}</button><button type="button" @click="removeIds('/manage/links', [row.id])">{{ tx("删除", "Delete") }}</button></td>
                 </template>
                 <template v-else-if="section === 'structure'">

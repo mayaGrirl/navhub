@@ -211,6 +211,9 @@ def _link(row: Link) -> dict:
         "favorite_count": row.favorite_count or 0,
         "recommend_count": row.recommend_count or 0,
         "click_count": row.click_count or 0,
+        "real_favorite_count": row.real_favorite_count or 0,
+        "real_recommend_count": row.real_recommend_count or 0,
+        "real_click_count": row.real_click_count or 0,
     }
 
 
@@ -276,13 +279,6 @@ def update_link(link_id: int, payload: dict, db: Session = Depends(db_session)):
             setattr(row, key, bool(payload[key]))
     if "sort" in payload:
         row.sort = int(payload["sort"])
-    for key in ("favorite_count", "recommend_count", "click_count"):
-        if key in payload:
-            setattr(row, key, max(0, int(payload[key] or 0)))
-            if key == "click_count":
-                row.clicks_ready = True
-            else:
-                row.counts_ready = True
     db.commit()
     return _link(row)
 

@@ -1,4 +1,5 @@
 import json
+import random
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -51,6 +52,25 @@ def _client_ip(request: Request) -> str:
 
 def _t(locale: str, en: str, zh: str) -> str:
     return zh if locale == "zh" else en
+
+
+def roll_display(db: Session, rows: list) -> None:
+    dirty = False
+    for row in rows:
+        key = f"display-roll:{row.id}"
+        if rds.get(key):
+            continue
+        row.favorite_count = (row.favorite_count or 0) + random.randint(1, 5)
+        row.recommend_count = (row.recommend_count or 0) + random.randint(0, 3)
+        row.click_count = (row.click_count or 0) + random.randint(1, 8)
+        rds.setex(key, 60 * 60 * 6, "1")
+        dirty = True
+    if dirty:
+        db.commit()
+
+
+def _shown(base: int | None, real: int | None) -> int:
+    return (base or 0) + (real or 0)
 
 
 def _like(query: str) -> str:
@@ -260,6 +280,8 @@ def board(tab_id: int, locale: str = "en", db: Session = Depends(db_session)):
         ).all()
         for row in rows:
             grouped[row.category_id].append(row)
+        flat = [row for bucket in grouped.values() for row in bucket]
+        roll_display(db, flat)
     payload = []
     for category in categories:
         rows = grouped[category.id]
@@ -276,8 +298,8 @@ def board(tab_id: int, locale: str = "en", db: Session = Depends(db_session)):
                         "logo_url": row.logo_url,
                         "is_free": row.is_free,
                         "is_hot": row.is_hot,
-                        "favorite_count": row.favorite_count or 0,
-                        "recommend_count": row.recommend_count or 0,
+                        "favorite_count": _shown(row.favorite_count, row.real_favorite_count),
+                        "recommend_count": _shown(row.recommend_count, row.real_recommend_count),
                     }
                     for row in rows
                 ],
@@ -328,7 +350,7 @@ def mark_link(link_id: int, payload: dict, user: User = Depends(require_user), d
     if not link or link.status != "published":
         raise HTTPException(status_code=404, detail="not found")
     row = db.scalar(select(LinkMark).where(LinkMark.user_id == user.id, LinkMark.link_id == link_id, LinkMark.kind == kind))
-    field = "favorite_count" if kind == "favorite" else "recommend_count"
+    field = "real_favorite_count" if kind == "favorite" else "real_recommend_count"
     if row:
         db.delete(row)
         setattr(link, field, max(0, (getattr(link, field) or 0) - 1))
@@ -343,7 +365,11 @@ def mark_link(link_id: int, payload: dict, user: User = Depends(require_user), d
         db.rollback()
         raise HTTPException(status_code=409, detail="already marked")
     drop_public_cache()
-    return {"on": on, "favorite_count": link.favorite_count or 0, "recommend_count": link.recommend_count or 0}
+    return {
+        "on": on,
+        "favorite_count": _shown(link.favorite_count, link.real_favorite_count),
+        "recommend_count": _shown(link.recommend_count, link.real_recommend_count),
+    }
 
 
 @router.get("/me/marks")
@@ -353,7 +379,7 @@ def my_marks(locale: str = "en", user: User = Depends(require_user), db: Session
     ).all()
     items = []
     for mark, link in rows:
-        items.append({"id": link.id, "kind": mark.kind, "title": _t(locale, link.title_en, link.title_zh), "url": link.url, "logo_url": link.logo_url, "favorite_count": link.favorite_count or 0, "recommend_count": link.recommend_count or 0})
+        items.append({"id": link.id, "kind": mark.kind, "title": _t(locale, link.title_en, link.title_zh), "url": link.url, "logo_url": link.logo_url, "favorite_count": _shown(link.favorite_count, link.real_favorite_count), "recommend_count": _shown(link.recommend_count, link.real_recommend_count)})
     return {"items": items}
 
 
@@ -365,9 +391,9 @@ def ranks(locale: str = "en", db: Session = Depends(db_session)):
         rows = db.execute(
             text(
                 "SELECT id, title_en, title_zh, url, logo_url, "
-                + ("favorite_count" if kind == "favorite" else "recommend_count")
+                + ("(favorite_count + real_favorite_count)" if kind == "favorite" else "(recommend_count + real_recommend_count)")
                 + " AS total FROM links WHERE status = 'published' AND "
-                + ("favorite_count" if kind == "favorite" else "recommend_count")
+                + ("(favorite_count + real_favorite_count)" if kind == "favorite" else "(recommend_count + real_recommend_count)")
                 + " > 0 ORDER BY total DESC LIMIT 5"
             ),
             {"kind": kind},
@@ -379,8 +405,8 @@ def ranks(locale: str = "en", db: Session = Depends(db_session)):
 
         rows = db.execute(
             text(
-                "SELECT id, title_en, title_zh, url, logo_url, click_count AS total "
-                "FROM links WHERE status = 'published' AND click_count > 0 "
+                "SELECT id, title_en, title_zh, url, logo_url, (click_count + real_click_count) AS total "
+                "FROM links WHERE status = 'published' AND (click_count + real_click_count) > 0 "
                 "ORDER BY total DESC LIMIT 10"
             )
         ).all()
@@ -395,12 +421,11 @@ def count_click(link_id: int, request: Request, db: Session = Depends(db_session
     if not link or link.status != "published":
         raise HTTPException(status_code=404, detail="not found")
     if not rate_limit(f"clk:{_client_ip(request)}:{link_id}", 1, 30):
-        return {"click_count": link.click_count or 0}
-    link.click_count = (link.click_count or 0) + 1
-    link.clicks_ready = True
+        return {"click_count": _shown(link.click_count, link.real_click_count)}
+    link.real_click_count = (link.real_click_count or 0) + 1
     db.commit()
     drop_public_cache()
-    return {"click_count": link.click_count}
+    return {"click_count": _shown(link.click_count, link.real_click_count)}
 
 
 @router.post("/proxy/token")

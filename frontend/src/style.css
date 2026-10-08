@@ -436,7 +436,7 @@ button, input, textarea, select { font: inherit; }
 .console-main td, .console-main th { border-bottom: 1px solid #eef1f4; padding: 10px 12px; vertical-align: middle; text-align: left; }
 .console-main tr:hover td { background: #fafbfc; }
 .console-main th.check, .console-main td.check { width: 42px; text-align: center; }
-.console-main td.num { text-align: right; font-variant-numeric: tabular-nums; color: #344054; }
+.console-main td.num { text-align: center; font-variant-numeric: tabular-nums; color: #344054; }
 .console-main td.time { white-space: nowrap; color: #667085; font-variant-numeric: tabular-nums; }
 .console-main .tag { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 999px; background: #f2f4f7; color: #475467; font-size: 12px; white-space: nowrap; }
 .console-main .tag.on { background: #e8f1ff; color: #175cd3; }
@@ -474,6 +474,8 @@ button, input, textarea, select { font: inherit; }
 .console-main .form button:hover, .console-main td button:hover { border-color: #c5d4f5; color: #2f6fed; }
 .console-main .form button.primary:hover, .console-main td button.primary:hover { background: #245ad0; border-color: #245ad0; color: #fff; }
 .console-main .table-scroll { overflow: auto; border: 1px solid #eef1f4; border-radius: 10px; }
+.console-main .table-scroll table { width: max-content; min-width: 100%; border-collapse: collapse; }
+.console-main th.num, .console-main td.num { text-align: center; min-width: 84px; white-space: nowrap; }
 .form.overview, .list-page { position: relative; }
 .list-mask { position: absolute; inset: 0; z-index: 6; display: grid; justify-items: center; align-content: center; gap: 8px; background: rgba(255, 255, 255, .72); border-radius: 12px; color: #667085; font-size: 13px; }
 .list-mask i { width: 28px; height: 28px; border-radius: 50%; border: 3px solid #d0d5dd; border-top-color: #2f6fed; animation: boot-spin .8s linear infinite; }
