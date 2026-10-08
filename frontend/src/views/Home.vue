@@ -703,7 +703,7 @@ onUnmounted(() => {
               <a class="card" :id="`link-${link.id}`" :class="{ spot: spotlight === link.id }" v-for="link in section.links" :key="link.id" :href="link.url" target="_blank" rel="noreferrer" @click="countClick(link)">
                 <span v-if="link.is_hot || link.is_free" class="card-flags">
                   <i v-if="link.is_hot" class="flag hot">HOT</i>
-                  <i v-if="link.is_free" class="flag free">{{ locale === "zh" ? "免费" : "FREE" }}</i>
+                  <i v-if="link.is_free" class="flag free">{{ t("freeBadge") }}</i>
                 </span>
                 <img class="logo" :src="logoOf(link)" alt="" loading="lazy" decoding="async" referrerpolicy="no-referrer" @error="useFallback($event, link)" />
                 <div>
