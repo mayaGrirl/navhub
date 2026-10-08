@@ -115,6 +115,8 @@ async def lifespan(_app: FastAPI):
         except Exception:
             pass
         for column in (
+            "ALTER TABLE tabs ADD COLUMN auto_crawl TINYINT(1) NOT NULL DEFAULT 0",
+            "ALTER TABLE tabs ADD COLUMN crawled_at DATETIME NULL",
             "ALTER TABLE crawl_jobs ADD COLUMN status VARCHAR(20) NOT NULL DEFAULT 'idle'",
             "ALTER TABLE crawl_jobs ADD COLUMN message VARCHAR(500) NOT NULL DEFAULT ''",
             "ALTER TABLE crawl_jobs ADD COLUMN found_count INT NOT NULL DEFAULT 0",

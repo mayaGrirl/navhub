@@ -48,6 +48,8 @@ class Tab(Base):
     sort: Mapped[int] = mapped_column(Integer, default=0)
     visible: Mapped[bool] = mapped_column(Boolean, default=True)
     adult: Mapped[bool] = mapped_column(Boolean, default=False)
+    auto_crawl: Mapped[bool] = mapped_column(Boolean, default=False)
+    crawled_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     categories: Mapped[list["Category"]] = relationship(back_populates="tab", cascade="all, delete-orphan")
 
 

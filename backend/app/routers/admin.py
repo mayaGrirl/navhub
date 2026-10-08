@@ -71,6 +71,8 @@ def _tab(row: Tab) -> dict:
         "sort": row.sort,
         "visible": row.visible,
         "adult": row.adult,
+        "auto_crawl": bool(row.auto_crawl),
+        "crawled_at": row.crawled_at.isoformat() if row.crawled_at else "",
     }
 
 
@@ -89,6 +91,7 @@ def create_tab(payload: dict, db: Session = Depends(db_session)):
         sort=int(payload.get("sort") or 0),
         visible=bool(payload.get("visible", True)),
         adult=bool(payload.get("adult", False)),
+        auto_crawl=bool(payload.get("auto_crawl", False)),
     )
     db.add(row)
     db.commit()
@@ -107,7 +110,7 @@ def update_tab(tab_id: int, payload: dict, db: Session = Depends(db_session)):
     for key in ("sort",):
         if key in payload:
             setattr(row, key, int(payload[key]))
-    for key in ("visible", "adult"):
+    for key in ("visible", "adult", "auto_crawl"):
         if key in payload:
             setattr(row, key, bool(payload[key]))
     db.commit()

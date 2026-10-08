@@ -170,6 +170,9 @@ def add_link(db, category_id, name, url):
 def main():
     db = SessionLocal()
     tab = db.scalar(select(Tab).where(Tab.slug == "media"))
+    if not tab or not tab.auto_crawl:
+        db.close()
+        return 0
     added = 0
     import httpx
 

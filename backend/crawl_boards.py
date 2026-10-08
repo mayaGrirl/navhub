@@ -180,8 +180,10 @@ def sync() -> tuple[int, Path]:
         ai = sections(fetch("https://www.amz123.com/ai"), AI_SLUG)
         cross = sections(fetch("https://www.tt123.com/"), CROSS_SLUG)
         print("fetched", "ai", len(ai), "cross", len(cross))
-        insert_rows(db, "ai", ai, known)
-        insert_rows(db, "cross-border", cross, known)
+        if db.scalar(select(Tab.auto_crawl).where(Tab.slug == "ai")):
+            insert_rows(db, "ai", ai, known)
+        if db.scalar(select(Tab.auto_crawl).where(Tab.slug == "cross-border")):
+            insert_rows(db, "cross-border", cross, known)
         db.commit()
         print("boards new", len(known) - before)
     finally:

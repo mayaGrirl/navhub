@@ -615,7 +615,7 @@ def ensure_misc(db: Session) -> None:
     import random
 
     tab = db.scalar(select(Tab).where(Tab.slug == "misc"))
-    if not tab:
+    if not tab or not tab.auto_crawl:
         return
     for index, (slug, en, zh, items) in enumerate(MISC):
         category = db.scalar(select(Category).where(Category.tab_id == tab.id, Category.slug == slug))
@@ -697,7 +697,7 @@ def ensure_world(db: Session) -> None:
 
     for tab_slug, (slug, en, zh, items) in WORLD.items():
         tab = db.scalar(select(Tab).where(Tab.slug == tab_slug))
-        if not tab:
+        if not tab or not tab.auto_crawl:
             continue
         category = db.scalar(select(Category).where(Category.tab_id == tab.id, Category.slug == slug))
         if not category:

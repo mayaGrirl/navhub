@@ -234,7 +234,8 @@ from datetime import datetime, timedelta
 from sqlalchemy import select
 
 from app.db import SessionLocal
-from app.models import CrawlItem, CrawlJob, CrawlLog, Link
+from app.models import Category, CrawlItem, CrawlJob, CrawlLog, Link, Tab
+from app.urls import norm_url
 
 _lock = threading.Lock()
 _running: set[int] = set()
@@ -337,6 +338,75 @@ def _run_job(job_id: int) -> None:
         db.close()
 
 
+def crawl_open_tabs() -> None:
+    db = SessionLocal()
+    try:
+        now = datetime.utcnow()
+        due = None
+        rows = db.scalars(select(Tab).where(Tab.auto_crawl.is_(True), Tab.kind == "links").order_by(Tab.id)).all()
+        for row in rows:
+            if not row.crawled_at or row.crawled_at + timedelta(hours=24) <= now:
+                due = row.id
+                break
+    finally:
+        db.close()
+    if due:
+        _crawl_tab(due)
+
+
+def _crawl_tab(tab_id: int) -> None:
+    db = SessionLocal()
+    try:
+        tab = db.get(Tab, tab_id)
+        if not tab or not tab.auto_crawl or tab.kind != "links":
+            return
+        categories = db.scalars(
+            select(Category).where(Category.tab_id == tab.id, Category.visible.is_(True)).order_by(Category.sort, Category.id)
+        ).all()
+        added = 0
+        searched = False
+        for category in categories[:8]:
+            current = db.get(Tab, tab_id)
+            if not current or not current.auto_crawl:
+                break
+            keyword = f"{tab.title_zh or tab.title_en} {category.title_zh or category.title_en}".strip()
+            try:
+                pages = search_web(keyword)
+                searched = True
+            except Exception as exc:
+                print("tab search failed", tab.slug, exc.__class__.__name__)
+                continue
+            for page in pages[:8]:
+                key = norm_url(page["url"])
+                if not key or db.scalar(select(Link.id).where(Link.norm_url == key)):
+                    continue
+                db.add(Link(
+                    category_id=category.id,
+                    title_en=(page["title"] or page["url"])[:160],
+                    title_zh=(page["title"] or page["url"])[:160],
+                    description_en="",
+                    description_zh="",
+                    url=page["url"][:500],
+                    norm_url=key[:500],
+                    logo_url=(page.get("logo_url") or "")[:500],
+                    status="published",
+                    source="crawl",
+                    counts_ready=True,
+                    clicks_ready=True,
+                ))
+                added += 1
+        current = db.get(Tab, tab_id)
+        if current:
+            current.crawled_at = datetime.utcnow() if searched or not categories else datetime.utcnow() - timedelta(hours=23)
+        db.commit()
+        if added:
+            from app.routers.public import drop_public_cache
+            drop_public_cache()
+        print("tab crawl", tab_id, added)
+    finally:
+        db.close()
+
+
 def schedule_jobs() -> None:
     def loop():
         while True:
@@ -354,5 +424,9 @@ def schedule_jobs() -> None:
                     start_job(job_id)
             finally:
                 db.close()
+            try:
+                crawl_open_tabs()
+            except Exception as exc:
+                print("tab crawl failed", exc.__class__.__name__)
 
     threading.Thread(target=loop, daemon=True).start()

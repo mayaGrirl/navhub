@@ -165,6 +165,12 @@ def from_tgnav() -> list[tuple[str, str, str]]:
 
 
 def main() -> None:
+    db = SessionLocal()
+    tab = db.scalar(select(Tab).where(Tab.slug == "telegram"))
+    if not tab or not tab.auto_crawl:
+        db.close()
+        return
+    db.close()
     buckets = {}
     for name, loader in (("dianbao", from_dianbao), ("github", from_github), ("tgnav", from_tgnav)):
         try:
@@ -174,6 +180,9 @@ def main() -> None:
             buckets[name] = []
     db = SessionLocal()
     tab = db.scalar(select(Tab).where(Tab.slug == "telegram"))
+    if not tab or not tab.auto_crawl:
+        db.close()
+        return
     order = max([row.sort for row in db.scalars(select(Category).where(Category.tab_id == tab.id))] or [0]) + 1
     added = 0
     for source, items in buckets.items():

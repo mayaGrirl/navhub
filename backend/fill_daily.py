@@ -137,7 +137,7 @@ def refresh() -> int:
         db.flush()
         for tab_slug, categories in CATALOG.items():
             tab = db.scalar(select(Tab).where(Tab.slug == tab_slug))
-            if not tab:
+            if not tab or not tab.auto_crawl:
                 continue
             for slug, sites in categories.items():
                 category = db.scalar(select(Category).where(Category.tab_id == tab.id, Category.slug == slug))

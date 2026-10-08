@@ -577,6 +577,16 @@ async function dropNote(id) {
     await load();
   });
 }
+async function toggleCrawl(row) {
+  const previous = row.auto_crawl;
+  row.auto_crawl = !row.auto_crawl;
+  try {
+    await http.put(`/manage/tabs/${row.id}`, { auto_crawl: row.auto_crawl });
+  } catch (err) {
+    row.auto_crawl = previous;
+    notice.value = err.response?.data?.detail || "save failed";
+  }
+}
 async function toggleNote(row) {
   const source = announcements.value.find((item) => item.id === row.id);
   if (!source) return;
@@ -679,7 +689,7 @@ function sourceLabel(source) {
 function openNew(kind) {
   const blank = {
     link: { ...linkForm.value, id: null },
-    tab: { slug: "", title_en: "", title_zh: "", kind: "links", sort: 0, visible: true, adult: false },
+    tab: { slug: "", title_en: "", title_zh: "", kind: "links", sort: 0, visible: true, adult: false, auto_crawl: false },
     category: { tab_id: tabs.value[0]?.id || "", slug: "", title_en: "", title_zh: "", sort: 0, visible: true },
     note: { title_en: "", title_zh: "", body_en: "", body_zh: "", image_url: "", popup: noteKind.value === "popup", enabled: true },
     ad: { ...adForm.value, id: null },
@@ -1393,7 +1403,7 @@ async function consoleLogout() {
                   <th>{{ tx("名称", "Name") }}</th><th>{{ tx("地址", "URL") }}</th><th>{{ tx("来源", "Source") }}</th><th>{{ tx("收藏", "Saves") }}</th><th>{{ tx("推荐", "Picks") }}</th><th>{{ tx("点击", "Clicks") }}</th>
                 </template>
                 <template v-else-if="section === 'structure'">
-                  <th>ID</th><th>slug</th><th>{{ tx("中文名", "Chinese") }}</th><th>{{ tx("英文名", "English") }}</th><th>{{ tx("类型", "Kind") }}</th><th>{{ tx("排序", "Sort") }}</th><th>{{ tx("显示", "Visible") }}</th><th>18+</th>
+                  <th>ID</th><th>slug</th><th>{{ tx("中文名", "Chinese") }}</th><th>{{ tx("英文名", "English") }}</th><th>{{ tx("类型", "Kind") }}</th><th>{{ tx("排序", "Sort") }}</th><th>{{ tx("显示", "Visible") }}</th><th>18+</th><th>{{ tx("全网采集", "Web crawl") }}</th>
                 </template>
                 <template v-else-if="section === 'categories'">
                   <th>ID</th><th>{{ tx("栏目", "Tab") }}</th><th>slug</th><th>{{ tx("中文名", "Chinese") }}</th><th>{{ tx("英文名", "English") }}</th><th>{{ tx("排序", "Sort") }}</th><th>{{ tx("显示", "Visible") }}</th>
@@ -1446,6 +1456,7 @@ async function consoleLogout() {
                 </template>
                 <template v-else-if="section === 'structure'">
                   <td>{{ row.id }}</td><td>{{ row.slug }}</td><td>{{ row.title_zh }}</td><td>{{ row.title_en }}</td><td>{{ row.kind }}</td><td class="num">{{ row.sort }}</td><td><span class="tag" :class="{ on: row.visible }">{{ row.visible ? tx("显示", "On") : tx("隐藏", "Off") }}</span></td><td><span class="tag" :class="{ warn: row.adult }">{{ row.adult ? tx("是", "Yes") : tx("否", "No") }}</span></td>
+                  <td><button v-if="row.kind === 'links'" type="button" :class="{ primary: row.auto_crawl }" @click="toggleCrawl(row)">{{ row.auto_crawl ? tx("采集中", "On") : tx("已关闭", "Off") }}</button></td>
                   <td class="row-actions"><button type="button" @click="openEdit('tab', row)">{{ tx("编辑", "Edit") }}</button><button type="button" @click="removeIds('/manage/tabs', [row.id])">{{ tx("删除", "Delete") }}</button></td>
                 </template>
                 <template v-else-if="section === 'categories'">
@@ -1630,6 +1641,7 @@ async function consoleLogout() {
               <label class="field"><span>{{ tx("排序", "Sort") }}</span><input v-model.number="editor.row.sort" type="number" /></label>
               <label class="field choice"><span>{{ tx("显示", "Visible") }}</span><input type="checkbox" v-model="editor.row.visible" /></label>
               <label class="field choice"><span>18+</span><input type="checkbox" v-model="editor.row.adult" /></label>
+              <label v-if="editor.row.kind === 'links'" class="field choice"><span>{{ tx("全网采集", "Web crawl") }}</span><input type="checkbox" v-model="editor.row.auto_crawl" /></label>
             </template>
             <template v-else-if="editor.kind === 'category'">
               <div class="field pick">
