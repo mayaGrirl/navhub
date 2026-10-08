@@ -81,7 +81,10 @@ function closePopup() {
 }
 
 async function loadPopup() {
-  if (!publicPage.value) return;
+  if (!publicPage.value) {
+    popup.value = null;
+    return;
+  }
   const today = new Date().toISOString().slice(0, 10);
   if (localStorage.getItem("nexa-popup-day") === today) return;
   try {
