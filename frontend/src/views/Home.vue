@@ -2,7 +2,7 @@
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { useRoute } from "vue-router";
 import { useI18n } from "vue-i18n";
-import http from "../api";
+import http, { track } from "../api";
 import FeedbackBox from "../components/FeedbackBox.vue";
 
 const route = useRoute();
@@ -273,14 +273,17 @@ function pickTab(id) {
   const next = tabs.value.find((item) => item.id === id);
   if (next && next.kind !== "home") boardLoading.value = true;
   tabId.value = id;
+  track("tab", next ? (next.title_zh || next.title_en || next.slug || id) : id);
 }
 
 function allowAdult() {
   adultOk.value = true;
   localStorage.setItem("adult-ok-2", "1");
+  track("adult", "enter");
 }
 
 function leaveAdult() {
+  track("adult", "leave");
   const home = tabs.value.find((item) => item.kind === "home");
   if (home) tabId.value = home.id;
 }
@@ -293,6 +296,7 @@ async function logout() {
 function setLocale(next) {
   locale.value = next;
   localStorage.setItem("locale", next);
+  track("locale", next);
 }
 
 const welcome = computed(() => locale.value === "zh" ? "欢迎来到 NEXA" : "Welcome to NEXA");
@@ -353,8 +357,14 @@ function useFallback(event, link) {
   }
 }
 
+function showNote(note) {
+  openNote.value = note;
+  track("notice", note?.title || note?.id || "");
+}
+
 async function searchWeb() {
   const text = query.value.trim();
+  track("search_web", `${engine.value} ${text}`.trim());
   const direct = ["browserscan", "browserleaks", "creepjs", "amiunique"].includes(engine.value);
   if (!text && !direct) return;
   const encoded = encodeURIComponent(text);
@@ -531,9 +541,10 @@ onUnmounted(() => {
         <button type="button" class="popup-x" aria-label="关闭" @click="openNote = null">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7l10 10M17 7 7 17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
         </button>
-        <img v-if="noteImage(openNote)" class="note-photo" :src="noteImage(openNote)" alt="" />
+        <p class="popup-head">{{ t("noticeDetail") }}</p>
         <h2>{{ openNote.title }}</h2>
         <p class="meta" v-if="openNote.created_at">{{ openNote.created_at.slice(0, 16).replace("T", " ") }}</p>
+        <img v-if="noteImage(openNote)" class="note-photo" :src="noteImage(openNote)" alt="" />
         <p>{{ openNote.body }}</p>
       </article>
     </div>
@@ -546,7 +557,7 @@ onUnmounted(() => {
         <div v-if="notes.length" class="ticker" :class="{ run: notes.length > 3 }">
           <div class="ticker-window">
             <div class="ticker-track" :style="notes.length > 3 ? { animationDuration: `${notes.length * 2.2}s` } : null">
-              <button v-for="(note, index) in tickerNotes" :key="note.id + '-' + index" type="button" @click.stop="openNote = note">
+              <button v-for="(note, index) in tickerNotes" :key="note.id + '-' + index" type="button" @click.stop="showNote(note)">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9v6h3l5 4V5L7 9H4zm11.5 3a3.5 3.5 0 0 0-1.8-3.05v6.1A3.5 3.5 0 0 0 15.5 12zM14 4.2v2.1a6 6 0 0 1 0 11.4v2.1a8 8 0 0 0 0-15.6z"/></svg>
                 <span>{{ note.title }}</span>
                 <i>›</i>

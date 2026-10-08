@@ -3,6 +3,9 @@ import { createPinia } from "pinia";
 import { createI18n } from "vue-i18n";
 import App from "./App.vue";
 import router from "./router";
+import { installTrack } from "./api";
+
+installTrack(router);
 import "./style.css";
 
 const i18n = createI18n({
@@ -56,6 +59,7 @@ const i18n = createI18n({
       "image required": "Choose an image under 2 MB.",
       submitted: "Submitted. Review runs in the background.",
       logout: "Log out",
+      noticeDetail: "Notice",
       submit: "Submit a link",
       center: "Account",
       proxyPool: "Free proxies",
@@ -146,6 +150,7 @@ const i18n = createI18n({
       "image required": "请选择 2MB 以内的图片。",
       submitted: "已提交，正在自动审核",
       logout: "退出",
+      noticeDetail: "公告详情",
       submit: "提交链接",
       center: "个人中心",
       proxyPool: "免费代理池",

@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 from app.crawl import fetch_meta, schedule_jobs, start_job, stop_job
 from app.deps import db_session, require_admin, require_admin_setup
 from app.security import client_ip, hash_password, checked_image, rds
-from app.models import Ad, AdminAlert, Announcement, AuthLog, Category, CrawlItem, CrawlJob, CrawlLog, Feedback, FeedbackNote, IpBan, Level, Link, MailLog, MailTask, NewsItem, Page, PointRule, Tab, User
+from app.models import ActionLog, Ad, AdminAlert, Announcement, AuthLog, Category, CrawlItem, CrawlJob, CrawlLog, Feedback, FeedbackNote, IpBan, Level, Link, MailLog, MailTask, NewsItem, Page, PointRule, Tab, User
 from app.urls import norm_url
 router = APIRouter(prefix="/api/manage", tags=["admin"], dependencies=[Depends(require_admin)])
 setup_router = APIRouter(prefix="/api/manage", tags=["admin"])
@@ -696,6 +696,43 @@ def remove_ip_ban(ip: str, db: Session = Depends(db_session)):
         db.delete(row)
         db.commit()
     return {"ok": True}
+
+
+@router.get("/actions")
+def actions(q: str = "", db: Session = Depends(db_session)):
+    from app.audit import purge_old
+    purge_old(db)
+    db.commit()
+    from datetime import datetime
+    from app.audit import KEEP
+    cutoff = datetime.utcnow() - KEEP
+    rows = db.scalars(select(ActionLog).where(ActionLog.created_at >= cutoff).order_by(ActionLog.id.desc()).limit(500)).all()
+    ids = {row.user_id for row in rows if row.user_id}
+    people = {}
+    if ids:
+        for user in db.scalars(select(User).where(User.id.in_(ids))).all():
+            people[user.id] = user
+    needle = q.strip().lower()
+    out = []
+    for row in rows:
+        person = people.get(row.user_id)
+        email = (person.email if person else row.email) or ""
+        name = (person.display_name if person else "") or ""
+        blob = " ".join([email, name, row.role, row.action, row.detail, row.ip]).lower()
+        if needle and needle not in blob:
+            continue
+        out.append({
+            "id": row.id,
+            "email": email,
+            "display_name": name,
+            "role": row.role or (person.role if person else ""),
+            "action": row.action,
+            "ok": bool(row.ok),
+            "detail": row.detail,
+            "ip": row.ip,
+            "created_at": row.created_at.isoformat(timespec="seconds") if row.created_at else "",
+        })
+    return out
 
 
 @router.get("/alerts")

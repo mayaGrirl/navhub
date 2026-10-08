@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { useI18n } from "vue-i18n";
-import http from "../api";
+import http, { track } from "../api";
 import FeedbackBox from "../components/FeedbackBox.vue";
 
 const route = useRoute();
@@ -10,6 +10,10 @@ const router = useRouter();
 const { locale, t } = useI18n();
 const ready = ref(false);
 const tab = ref("profile");
+function openAccount(next) {
+  tab.value = next;
+  track("account", next);
+}
 const user = ref(null);
 const name = ref("");
 const notice = ref("");
@@ -497,13 +501,13 @@ async function logout() {
         <em v-if="levelInfo">Lv.{{ levelInfo.level }} · {{ levelInfo.points }} {{ locale === "zh" ? "积分" : "pts" }}</em>
       </div>
       <nav class="account-nav">
-        <button type="button" :class="{ on: tab === 'profile' }" @click="tab = 'profile'">{{ t("profile") }}</button>
-        <button type="button" :class="{ on: tab === 'levels' }" @click="tab = 'levels'">{{ locale === "zh" ? "等级规则" : "Levels" }}</button>
-        <button type="button" :class="{ on: tab === 'marks' }" @click="tab = 'marks'">{{ locale === "zh" ? "收藏推荐" : "Saved" }}</button>
-        <button type="button" :class="{ on: tab === 'submit' }" @click="tab = 'submit'">{{ t("submit") }}</button>
-        <button type="button" :class="{ on: tab === 'proxy' }" @click="tab = 'proxy'">{{ t("proxyPool") }}</button>
-        <button type="button" :class="{ on: tab === 'video' }" @click="tab = 'video'">{{ t("videoPlayer") }}</button>
-        <button type="button" :class="{ on: tab === 'feedback' }" @click="tab = 'feedback'">{{ locale === "zh" ? "网站反馈" : "Feedback" }}</button>
+        <button type="button" :class="{ on: tab === 'profile' }" @click="openAccount('profile')">{{ t("profile") }}</button>
+        <button type="button" :class="{ on: tab === 'levels' }" @click="openAccount('levels')">{{ locale === "zh" ? "等级规则" : "Levels" }}</button>
+        <button type="button" :class="{ on: tab === 'marks' }" @click="openAccount('marks')">{{ locale === "zh" ? "收藏推荐" : "Saved" }}</button>
+        <button type="button" :class="{ on: tab === 'submit' }" @click="openAccount('submit')">{{ t("submit") }}</button>
+        <button type="button" :class="{ on: tab === 'proxy' }" @click="openAccount('proxy')">{{ t("proxyPool") }}</button>
+        <button type="button" :class="{ on: tab === 'video' }" @click="openAccount('video')">{{ t("videoPlayer") }}</button>
+        <button type="button" :class="{ on: tab === 'feedback' }" @click="openAccount('feedback')">{{ locale === "zh" ? "网站反馈" : "Feedback" }}</button>
         <a href="/">{{ locale === "zh" ? "返回主页" : "Back to home" }}</a>
         <button type="button" @click="logout">{{ t("logout") }}</button>
       </nav>

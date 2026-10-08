@@ -6,7 +6,7 @@ const AuthView = () => import("./views/AuthView.vue");
 const SubmitView = () => import("./views/SubmitView.vue");
 const AdminView = () => import("./views/AdminView.vue");
 
-export default createRouter({
+const router = createRouter({
   history: createWebHistory(),
   routes: [
     { path: "/", component: Home, meta: { title: "NEXA — AI tools, news, and rankings", description: "NEXA is a bilingual directory of AI tools, cross-border tools, news, Telegram channels, and GitHub rankings.", index: true } },
@@ -19,3 +19,5 @@ export default createRouter({
     { path: "/:gate", component: AdminView, props: true, meta: { title: "Console — NEXA", index: false } },
   ],
 });
+
+export default router;

@@ -238,6 +238,13 @@ async def lifespan(_app: FastAPI):
     from app.review import sweep_open
 
     sweep_open()
+    from app.audit import purge_old
+    audit_db = SessionLocal()
+    try:
+        purge_old(audit_db)
+        audit_db.commit()
+    finally:
+        audit_db.close()
     ensure_proxy_pool()
     yield
 
@@ -275,6 +282,33 @@ async def anti_scrape(request, call_next):
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
     response.headers["X-XSS-Protection"] = "0"
+    return response
+
+
+@app.middleware("http")
+async def audit_mw(request, call_next):
+    path = request.url.path
+    email_hint = ""
+    if request.method == "POST" and path in {"/api/auth/login", "/api/auth/register", "/api/auth/console"}:
+        try:
+            from app.audit import _email_hint
+            email_hint = _email_hint(await request.body())
+        except Exception:
+            email_hint = ""
+    admin_path = path.startswith("/api/manage") or path.startswith("/api/auth/console")
+    from app.audit import session_user_id, write_action
+    from app.security import client_ip
+    actor_id = session_user_id(request.cookies.get("nav_console" if admin_path else "nav_session"))
+    try:
+        response = await call_next(request)
+        status = response.status_code
+    except Exception:
+        write_action(request.method, path, request.url.query, 500, client_ip(request), actor_id, email_hint)
+        raise
+    try:
+        write_action(request.method, path, request.url.query, status, client_ip(request), actor_id, email_hint)
+    except Exception:
+        pass
     return response
 
 

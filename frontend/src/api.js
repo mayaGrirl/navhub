@@ -7,6 +7,18 @@ http.interceptors.request.use(async (config) => {
   return config;
 });
 
+const PUBLIC = new Set(["/", "/about", "/contact", "/advertise", "/login", "/register", "/submit"]);
+
+export function track(action, detail = "") {
+  http.post("/track", { action, detail: String(detail || "").slice(0, 300) }).catch(() => {});
+}
+
+export function installTrack(router) {
+  router.afterEach((to) => {
+    if (PUBLIC.has(to.path)) track("view", to.path);
+  });
+}
+
 export function setGate(gate) {
   if (gate) http.defaults.headers.common["X-Admin-Gate"] = gate;
   else delete http.defaults.headers.common["X-Admin-Gate"];

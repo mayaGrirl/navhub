@@ -2,7 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import { useI18n } from "vue-i18n";
-import http, { setGate } from "../api";
+import http, { setGate, track } from "../api";
 
 const { locale } = useI18n();
 const zh = computed(() => String(locale.value).startsWith("zh"));
@@ -102,6 +102,7 @@ const sectionTitle = computed(() => ({
   security: tx("账号安全", "Security"),
   mail: tx("邮件", "Mail"),
   feedback: tx("反馈", "Feedback"),
+  actions: tx("日志", "Logs"),
 }[section.value] || ""));
 watch(section, () => {
   query.value = "";
@@ -115,6 +116,7 @@ watch(section, () => {
   editor.value = null;
   notice.value = "";
   load();
+  if (ready.value) track("view", `admin:${section.value}`);
 });
 watch([query, listTab, listCat, listSource, listStatus], () => { pageNo.value = 1; jumpNo.value = 1; picked.value = []; });
 function hitText(row, keys) {
@@ -189,7 +191,156 @@ const sourceView = computed(() => pageOf(proxies.value.source_items || [], ["url
 const levelView = computed(() => pageOf(levels.value, ["level"]));
 const alertView = computed(() => pageOf(alerts.value, ["email", "ip", "detail"]));
 const banView = computed(() => pageOf(ipBans.value, ["ip"]));
-const views = { links: linkView, structure: tabView, categories: catView, news: newsView, pages: pageView, notes: noteView, ads: adView, crawl: crawlView, proxies: proxyView, sources: sourceView, levels: levelView, alerts: alertView, bans: banView };
+const logKind = ref("user");
+const logAccount = ref("");
+const logFrom = ref("");
+const logTo = ref("");
+const logAction = ref("");
+const logResult = ref("");
+const logIp = ref("");
+function isAdminLog(row) {
+  return row.role === "admin" || String(row.action || "").startsWith("admin");
+}
+const logActions = computed(() => {
+  const pool = actions.value.filter((row) => (logKind.value === "admin" ? isAdminLog(row) : !isAdminLog(row)));
+  return [...new Set(pool.map((row) => row.action).filter(Boolean))];
+});
+const actionView = computed(() => pageOf(actions.value.filter((row) => {
+  if (logKind.value === "admin" ? !isAdminLog(row) : isAdminLog(row)) return false;
+  const account = logAccount.value.trim().toLowerCase();
+  const who = `${row.email || ""} ${row.display_name || ""}`.toLowerCase();
+  if (account && !who.includes(account)) return false;
+  const ip = logIp.value.trim().toLowerCase();
+  if (ip && !String(row.ip || "").toLowerCase().includes(ip)) return false;
+  if (logAction.value && row.action !== logAction.value) return false;
+  if (logResult.value === "ok" && !row.ok) return false;
+  if (logResult.value === "fail" && row.ok) return false;
+  const stamp = String(row.created_at || "").slice(0, 10);
+  if (logFrom.value && stamp < logFrom.value) return false;
+  if (logTo.value && stamp > logTo.value) return false;
+  return true;
+}), ["email", "display_name", "detail"]));
+const views = { links: linkView, structure: tabView, categories: catView, news: newsView, pages: pageView, notes: noteView, ads: adView, crawl: crawlView, proxies: proxyView, sources: sourceView, levels: levelView, alerts: alertView, bans: banView, actions: actionView };
+const actionNames = {
+  register: ["注册", "Register"],
+  login: ["登录", "Login"],
+  admin_login: ["管理员登录", "Admin login"],
+  logout: ["退出", "Log out"],
+  admin_logout: ["管理员退出", "Admin log out"],
+  profile: ["修改资料", "Profile"],
+  password: ["修改密码", "Password"],
+  admin_password: ["管理员改密", "Admin password"],
+  totp_setup: ["验证器设置", "Authenticator setup"],
+  totp_confirm: ["验证器确认", "Authenticator confirm"],
+  totp_switch: ["验证器开关", "Authenticator switch"],
+  plan: ["开通会员", "Plan"],
+  submit: ["提交链接", "Submit link"],
+  feedback: ["提交反馈", "Feedback"],
+  feedback_reply: ["回复反馈", "Feedback reply"],
+  upload: ["上传图片", "Upload"],
+  proxy_token: ["代理令牌", "Proxy token"],
+  video: ["视频播放", "Video"],
+  mark: ["收藏或推荐", "Save or pick"],
+  tab: ["栏目", "Tab"],
+  category: ["分类", "Category"],
+  link: ["链接", "Link"],
+  page: ["单页", "Page"],
+  ad: ["广告", "Ad"],
+  news: ["资讯", "News"],
+  notice: ["公告", "Notice"],
+  user: ["用户", "User"],
+  admin_create: ["新增管理员", "Add admin"],
+  admin_upload: ["后台上传", "Admin upload"],
+  ip_ban: ["禁用 IP", "Block IP"],
+  ip_unban: ["解除 IP", "Unblock IP"],
+  alert: ["处理报警", "Alert"],
+  crawl: ["采集任务", "Crawl job"],
+  crawl_item: ["采集条目", "Crawl item"],
+  crawl_fetch: ["手动采集", "Manual crawl"],
+  level: ["等级", "Level"],
+  point_rule: ["积分规则", "Point rule"],
+  mail_settings: ["邮件设置", "Mail settings"],
+  mail_test: ["测试邮件", "Test mail"],
+  mail_send: ["发送邮件", "Send mail"],
+  mail_task: ["邮件任务", "Mail task"],
+  feedback_admin: ["处理反馈", "Feedback admin"],
+  proxy_clear: ["清空代理", "Clear proxies"],
+  proxy_source_clear: ["清空代理源", "Clear proxy sources"],
+  admin: ["后台操作", "Admin action"],
+  account: ["账号页", "Account page"],
+  click: ["点击链接", "Link click"],
+  search: ["站内搜索", "Site search"],
+  view: ["浏览页面", "Page view"],
+  locale: ["切换语言", "Language"],
+  tab: ["切换栏目", "Tab"],
+  notice: ["打开公告", "Notice"],
+  search_web: ["外部搜索", "Web search"],
+  adult: ["成人栏目", "Adult tab"],
+};
+function actorText(row) {
+  const email = String(row.email || "").trim();
+  const name = String(row.display_name || "").trim();
+  if (!email && !name) return tx("未登录", "Signed out");
+  if (email && name) return `${email}（${name}）`;
+  return email || name;
+}
+function actionLabel(code) {
+  const pair = actionNames[code];
+  return pair ? tx(pair[0], pair[1]) : code;
+}
+const pageNames = {
+  "/": ["首页", "Home"],
+  "/about": ["关于", "About"],
+  "/contact": ["联系", "Contact"],
+  "/advertise": ["广告合作", "Advertise"],
+  "/login": ["登录", "Log in"],
+  "/register": ["注册", "Register"],
+  "/submit": ["个人中心", "Account"],
+  profile: ["个人资料", "Profile"],
+  levels: ["等级规则", "Levels"],
+  marks: ["收藏推荐", "Saved"],
+  submit: ["提交链接", "Submit a link"],
+  proxy: ["免费代理", "Proxies"],
+  video: ["视频播放", "Video"],
+  feedback: ["网站反馈", "Feedback"],
+  "admin:overview": ["概览", "Overview"],
+  "admin:alerts": ["报警", "Alerts"],
+  "admin:links": ["链接", "Links"],
+  "admin:structure": ["栏目", "Tabs"],
+  "admin:categories": ["分类", "Categories"],
+  "admin:news": ["资讯", "News"],
+  "admin:pages": ["单页", "Pages"],
+  "admin:notes": ["公告", "Notices"],
+  "admin:ads": ["广告", "Ads"],
+  "admin:crawl": ["采集", "Crawl"],
+  "admin:users": ["用户", "Users"],
+  "admin:proxies": ["代理", "Proxies"],
+  "admin:levels": ["等级", "Levels"],
+  "admin:security": ["账号安全", "Security"],
+  "admin:mail": ["邮件", "Mail"],
+  "admin:feedback": ["反馈", "Feedback"],
+  "admin:actions": ["日志", "Logs"],
+};
+function placeName(raw) {
+  const key = String(raw || "").trim();
+  const pair = pageNames[key];
+  return pair ? tx(pair[0], pair[1]) : key;
+}
+function actionText(row) {
+  const base = actionLabel(row.action);
+  const detail = String(row.detail || "").trim();
+  if (row.action === "view" || row.action === "account" || row.action === "tab" || row.action === "notice") {
+    const where = placeName(detail);
+    return where ? `${base} · ${where}` : base;
+  }
+  const hit = detail.match(/^(GET|POST|PUT|PATCH|DELETE)\s+\/api\/(.+)$/);
+  if (!hit) return detail && detail !== row.action ? `${base} · ${detail}` : base;
+  const verb = { POST: tx("新增", "Create"), PUT: tx("修改", "Update"), PATCH: tx("修改", "Update"), DELETE: tx("删除", "Delete"), GET: tx("查看", "Open") }[hit[1]] || hit[1];
+  const parts = hit[2].split("/").filter(Boolean);
+  const tail = parts[parts.length - 1];
+  const id = /^\d+$/.test(tail) ? ` #${tail}` : "";
+  return `${verb}${base}${id}`;
+}
 const proxyKind = ref("alive");
 const activeView = computed(() => {
   if (section.value === "proxies" && proxyKind.value === "sources") return sourceView.value;
@@ -255,6 +406,7 @@ const levels = ref([]);
 const pointsPerLink = ref(1);
 const items = ref([]);
 const alerts = ref([]);
+const actions = ref([]);
 const news = ref([]);
 const announcements = ref([]);
 const noteForm = ref({ title_en: "", title_zh: "", body_en: "", body_zh: "", enabled: true });
@@ -367,6 +519,8 @@ async function load(quiet = false) {
     take("/manage/mail", (data) => { mailState.value = data; });
   } else if (name === "feedback") {
     take("/manage/feedback", (data) => { feedbackRows.value = data; if (feedbackCurrent.value) feedbackCurrent.value = data.find((row) => row.id === feedbackCurrent.value.id) || feedbackCurrent.value; });
+  } else if (name === "actions") {
+    take("/manage/actions", (data) => { actions.value = data; });
   }
   if (name !== "alerts") take("/manage/alerts", (data) => { alerts.value = data; });
   try {
@@ -1048,6 +1202,7 @@ async function consoleLogout() {
         <button class="text-btn" :class="{ on: section === 'levels' }" @click="section = 'levels'">{{ tx("等级", "Levels") }}</button>
         <button class="text-btn" :class="{ on: section === 'mail' }" @click="section = 'mail'">{{ tx("邮件", "Mail") }}</button>
         <button class="text-btn" :class="{ on: section === 'feedback' }" @click="section = 'feedback'">{{ tx("反馈", "Feedback") }}</button>
+        <button class="text-btn" :class="{ on: section === 'actions' }" @click="section = 'actions'">{{ tx("日志", "Logs") }}</button>
       </nav>
     </aside>
     <div class="console-main">
@@ -1174,7 +1329,7 @@ async function consoleLogout() {
             <option value="free">{{ tx("免费", "Free") }}</option>
             <option value="vip">VIP</option>
           </select>
-          <input v-if="section !== 'categories' && section !== 'levels' && section !== 'ads'" v-model="query" :placeholder="section === 'users' ? tx('搜索邮箱或 IP', 'Search email or IP') : section === 'proxies' ? tx('搜索代理地址', 'Search proxy') : tx('搜索名称或地址', 'Search name or URL')" />
+          <input v-if="section !== 'categories' && section !== 'levels' && section !== 'ads' && section !== 'actions'" v-model="query" :placeholder="section === 'users' ? tx('搜索邮箱或 IP', 'Search email or IP') : section === 'proxies' ? tx('搜索代理地址', 'Search proxy') : tx('搜索名称或地址', 'Search name or URL')" />
           </div>
           <div class="actions">
           <button v-if="section === 'links'" class="primary" type="button" @click="openNew('link')">{{ tx("新增", "Add") }}</button>
@@ -1200,6 +1355,10 @@ async function consoleLogout() {
             <button type="button" :class="{ primary: userKind === 'member' }" @click="userKind = 'member'; pageNo = 1">{{ tx("前台会员", "Members") }}</button>
             <button type="button" :class="{ primary: userKind === 'admin' }" @click="userKind = 'admin'; pageNo = 1">{{ tx("管理员", "Admins") }}</button>
             <button v-if="userKind === 'admin'" class="primary" type="button" @click="openNew('admin')">{{ tx("新增管理员", "Add admin") }}</button>
+          </template>
+          <template v-if="section === 'actions'">
+            <button type="button" :class="{ primary: logKind === 'user' }" @click="logKind = 'user'; pageNo = 1">{{ tx("用户", "Users") }}</button>
+            <button type="button" :class="{ primary: logKind === 'admin' }" @click="logKind = 'admin'; pageNo = 1">{{ tx("管理员", "Admins") }}</button>
           </template>
           <button v-if="section === 'alerts'" class="primary" type="button" @click="openNew('ban')">{{ tx("禁用 IP", "Block IP") }}</button>
           <template v-if="section === 'links'">
@@ -1390,6 +1549,55 @@ async function consoleLogout() {
               </div>
             </div>
           </article>
+        </div>
+
+        <div v-else-if="section === 'actions'" class="table-scroll">
+          <div class="log-filters">
+            <input v-model="logAccount" :placeholder="tx('账号：邮箱或用户名', 'Account: email or name')" @input="pageNo = 1" />
+            <input v-model="logFrom" type="date" :title="tx('开始日期', 'From')" @change="pageNo = 1" />
+            <input v-model="logTo" type="date" :title="tx('结束日期', 'To')" @change="pageNo = 1" />
+            <select v-model="logAction" @change="pageNo = 1">
+              <option value="">{{ tx("全部操作", "All actions") }}</option>
+              <option v-for="code in logActions" :key="code" :value="code">{{ actionLabel(code) }}</option>
+            </select>
+            <select v-model="logResult" @change="pageNo = 1">
+              <option value="">{{ tx("全部结果", "All results") }}</option>
+              <option value="ok">{{ tx("成功", "OK") }}</option>
+              <option value="fail">{{ tx("失败", "Failed") }}</option>
+            </select>
+            <input v-model="logIp" placeholder="IP" @input="pageNo = 1" />
+          </div>
+          <table>
+            <thead>
+              <tr>
+                <th>{{ tx("时间", "Time") }}</th>
+                <th>{{ tx("账号", "Account") }}</th>
+                <th>{{ tx("身份", "Role") }}</th>
+                <th>{{ tx("操作", "Action") }}</th>
+                <th>{{ tx("结果", "Result") }}</th>
+                <th>IP</th>
+                <th>{{ tx("说明", "Detail") }}</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="row in activeView.rows" :key="row.id">
+                <td>{{ (row.created_at || "").replace("T", " ") }}</td>
+                <td>{{ actorText(row) }}</td>
+                <td>{{ row.role === "admin" ? tx("管理员", "Admin") : row.role === "user" ? tx("用户", "User") : "—" }}</td>
+                <td>{{ actionText(row) }}</td>
+                <td><span class="tag" :class="{ on: row.ok, warn: !row.ok }">{{ row.ok ? tx("成功", "OK") : tx("失败", "Failed") }}</span></td>
+                <td>{{ row.ip }}</td>
+                <td class="clip">{{ row.detail }}</td>
+              </tr>
+              <tr v-if="!activeView.rows.length"><td colspan="7">{{ tx("没有记录", "No rows") }}</td></tr>
+            </tbody>
+          </table>
+          <div class="console-pager">
+            <span class="pager-total">{{ tx(`共 ${activeView.total} 条`, `${activeView.total} total`) }}</span>
+            <button type="button" :disabled="activeView.current <= 1" @click="goPage(activeView.current - 1)">‹</button>
+            <button type="button" class="is-current">{{ activeView.current }}</button>
+            <button type="button" :disabled="activeView.current >= activeView.pages" @click="goPage(activeView.current + 1)">›</button>
+          </div>
         </div>
 
         <div v-else :class="{ 'crawl-split': section === 'crawl' }">

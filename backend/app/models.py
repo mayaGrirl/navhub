@@ -37,6 +37,20 @@ class AuthLog(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
 
+class ActionLog(Base):
+    __tablename__ = "action_logs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    email: Mapped[str] = mapped_column(String(255), default="")
+    role: Mapped[str] = mapped_column(String(20), default="")
+    action: Mapped[str] = mapped_column(String(40), default="")
+    ok: Mapped[bool] = mapped_column(Boolean, default=True)
+    detail: Mapped[str] = mapped_column(String(300), default="")
+    ip: Mapped[str] = mapped_column(String(64), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, index=True)
+
+
 class Tab(Base):
     __tablename__ = "tabs"
 

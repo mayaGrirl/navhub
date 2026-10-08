@@ -12,12 +12,28 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
 from app.config import settings
-from app.deps import db_session, require_user
+from pydantic import BaseModel, Field
+
+from app.deps import current_user, db_session, require_user
 from app.models import Ad, Announcement, Category, Feedback, FeedbackNote, IpBan, Level, Link, LinkMark, NewsItem, Page, PointRule, Tab, User
 from app.urls import norm_url
 from app.security import client_ip, month_key, plan_active, quota_for, rate_limit, rds, checked_image
 
 router = APIRouter(prefix="/api", tags=["public"])
+
+
+class TrackIn(BaseModel):
+    action: str = Field(max_length=40)
+    detail: str = Field(default="", max_length=300)
+
+
+@router.post("/track")
+def track_event(body: TrackIn, request: Request, user: User | None = Depends(current_user)):
+    from app.audit import write_track
+    if not rate_limit(f"track:{_client_ip(request)}", 80, 60):
+        return {"ok": True}
+    write_track(body.action.strip(), body.detail.strip(), _client_ip(request), user.id if user else None)
+    return {"ok": True}
 
 
 def _client_ip(request: Request) -> str:

@@ -22,9 +22,10 @@
       <button type="button" class="popup-x" aria-label="关闭" @click="closePopup">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 7l10 10M17 7 7 17" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
       </button>
+      <p class="popup-head">{{ t("noticeDetail") }}</p>
       <a :href="popup.href || undefined">
-        <img v-if="popup.image" :src="popup.image" alt="" />
         <h2>{{ popup.title }}</h2>
+        <img v-if="popup.image" :src="popup.image" alt="" />
         <p>{{ popup.body }}</p>
       </a>
     </article>
