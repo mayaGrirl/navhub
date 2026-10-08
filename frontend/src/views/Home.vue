@@ -179,9 +179,11 @@ async function loadBoard() {
   }
 }
 
-function jumpTo(id) {
+function jumpTo(id, name) {
   activeSection.value = id;
   document.getElementById(`cat-${id}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+  const tab = tabLabel(currentTab.value) || (locale.value === "zh" ? "首页" : "Home");
+  if (name) track("view", `/:${tab} · ${name}`);
 }
 
 async function loadSiteBoards() {
@@ -270,7 +272,7 @@ function onBannerUp(event) {
 
 function tabLabel(tab) {
   if (!tab) return "";
-  return locale.value === "zh" ? (tab.title_zh || tab.title_en || "") : (tab.title_en || tab.title_zh || "");
+  return tab.title || (locale.value === "zh" ? (tab.title_zh || tab.title_en) : (tab.title_en || tab.title_zh)) || tab.slug || "";
 }
 function trackHome() {
   const name = tabLabel(currentTab.value);
@@ -282,7 +284,7 @@ function pickTab(id) {
   const next = tabs.value.find((item) => item.id === id);
   if (next && next.kind !== "home") boardLoading.value = true;
   tabId.value = id;
-  trackHome();
+  track("view", `/:${tabLabel(next) || id}`);
 }
 
 function allowAdult() {
@@ -636,7 +638,7 @@ onUnmounted(() => {
       <aside class="panel side-jump">
         <template v-if="isHome">
           <p class="side-label">{{ locale === "zh" ? "资讯" : "News" }}</p>
-          <button v-for="group in groupedNews" :key="group.id" :class="{ on: activeSection === group.id }" @click="jumpTo(group.id)">
+          <button v-for="group in groupedNews" :key="group.id" :class="{ on: activeSection === group.id }" @click="jumpTo(group.id, locale === 'zh' ? group.zh : group.en)">
             <i></i>
             <span>{{ locale === "zh" ? group.zh : group.en }}</span>
             <em>{{ group.items.length }}</em>
@@ -648,7 +650,7 @@ onUnmounted(() => {
           </div>
           <template v-else>
           <p class="side-label">{{ currentTab?.title }}</p>
-          <button v-for="section in sections" :key="section.id" :class="{ on: activeSection === section.id }" @click="jumpTo(section.id)">
+          <button v-for="section in sections" :key="section.id" :class="{ on: activeSection === section.id }" @click="jumpTo(section.id, section.title)">
             <i></i>
             <span>{{ section.title }}</span>
             <em>{{ section.links.length }}</em>
