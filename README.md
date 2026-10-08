@@ -33,6 +33,7 @@
 ```
 backend/          接口、种子数据、资讯和目录任务
 frontend/         Vue 站点
+docs/nav.py       本机开启、关闭、重启接口和前端
 proxy-pool/       可选代理池
 deploy/nginx.conf 同域反代示例
 docker-compose.yml
@@ -129,7 +130,29 @@ MAIL_PROVIDER=log
 
 ## 本地运行
 
-三个进程分开开。接口和前端都只监听本机。
+接口和前端可以一条命令一起开。脚本在 `docs/nav.py`，Windows、Linux、macOS 用法相同。MySQL 和 Redis 需要先自己启动。第一次运行前仍要按下面的步骤装好 `backend/.venv` 和 `frontend/node_modules`。
+
+在项目根目录执行：
+
+```bash
+python docs/nav.py start
+python docs/nav.py status
+python docs/nav.py restart
+python docs/nav.py stop
+```
+
+Linux / macOS 如果 `python` 不在 PATH 里，把上面的 `python` 换成 `python3`。
+
+| 命令 | 作用 |
+| --- | --- |
+| `start` | 拉起接口 `127.0.0.1:8000` 和前端 `127.0.0.1:5173`。任一端口已被占用就不再启动，先看 `status` |
+| `status` | 看两个端口是否在监听，以及进程号 |
+| `restart` | 先关闭再开启 |
+| `stop` | 关闭这两个端口上的监听进程。端口上如果有别的程序，也会被关掉 |
+
+脚本每次启动会清空并重写 `.run/api.log`、`.run/web.log`，进程号写在同目录的 `.pid` 文件里。这个目录不进 Git。启动后如果健康检查没通过，终端会打出对应日志的最后几行。浏览器打开 http://127.0.0.1:5173/ ，接口健康检查是 http://127.0.0.1:8000/api/health 。
+
+三个进程也可以分开开。接口和前端都只监听本机。
 
 接口，Windows：
 
@@ -164,8 +187,6 @@ cd frontend
 npm install
 ./node_modules/.bin/vite --host 127.0.0.1 --port 5173
 ```
-
-浏览器打开 http://127.0.0.1:5173/ 。接口健康检查是 http://127.0.0.1:8000/api/health 。
 
 可选代理池。先建库 `navproxy`，复制 `proxy-pool/.env.example` 为 `proxy-pool/.env`，再在 `proxy-pool` 目录执行：
 
