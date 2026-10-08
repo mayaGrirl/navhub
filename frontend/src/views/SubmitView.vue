@@ -12,7 +12,7 @@ const ready = ref(false);
 const tab = ref("profile");
 function openAccount(next) {
   tab.value = next;
-  track("account", next);
+  track("view", `submit:${next}`);
 }
 const user = ref(null);
 const name = ref("");
@@ -61,6 +61,7 @@ onMounted(async () => {
     return;
   }
   if (["proxy", "submit", "profile", "levels", "marks", "video", "feedback"].includes(route.query.tab)) tab.value = route.query.tab;
+  track("view", `submit:${tab.value}`);
   const [tokenRes, levelRes, rankRes, markRes] = await Promise.all([
     http.get("/proxy/token"),
     http.get("/me/level"),

@@ -214,6 +214,7 @@ async def lifespan(_app: FastAPI):
             "CREATE INDEX ix_links_rec ON links (status, recommend_count)",
             "CREATE INDEX ix_links_clk ON links (status, click_count)",
             "CREATE UNIQUE INDEX ux_link_marks ON link_marks (user_id, link_id, kind)",
+            "ALTER TABLE action_logs MODIFY detail VARCHAR(800) NOT NULL DEFAULT ''",
         ):
             try:
                 conn.execute(text(statement))
@@ -289,10 +290,15 @@ async def anti_scrape(request, call_next):
 async def audit_mw(request, call_next):
     path = request.url.path
     email_hint = ""
-    if request.method == "POST" and path in {"/api/auth/login", "/api/auth/register", "/api/auth/console"}:
+    params = ""
+    if request.method in {"POST", "PUT", "PATCH"}:
         try:
-            from app.audit import _email_hint
-            email_hint = _email_hint(await request.body())
+            from app.audit import _email_hint, safe_params
+            raw = await request.body()
+            if path in {"/api/auth/login", "/api/auth/register", "/api/auth/console"}:
+                email_hint = _email_hint(raw)
+            if path.startswith("/api/manage") or path.startswith("/api/auth"):
+                params = safe_params(raw)
         except Exception:
             email_hint = ""
     admin_path = path.startswith("/api/manage") or path.startswith("/api/auth/console")
@@ -303,10 +309,10 @@ async def audit_mw(request, call_next):
         response = await call_next(request)
         status = response.status_code
     except Exception:
-        write_action(request.method, path, request.url.query, 500, client_ip(request), actor_id, email_hint)
+        write_action(request.method, path, request.url.query, 500, client_ip(request), actor_id, email_hint, params)
         raise
     try:
-        write_action(request.method, path, request.url.query, status, client_ip(request), actor_id, email_hint)
+        write_action(request.method, path, request.url.query, status, client_ip(request), actor_id, email_hint, params)
     except Exception:
         pass
     return response

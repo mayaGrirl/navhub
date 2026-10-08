@@ -6,7 +6,7 @@ from pathlib import Path
 import secrets
 
 import httpx
-from fastapi import APIRouter, Depends, File, Header, HTTPException, Query, Request, Response, UploadFile
+from fastapi import APIRouter, Cookie, Depends, File, Header, HTTPException, Query, Request, Response, UploadFile
 from sqlalchemy import func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
@@ -28,11 +28,20 @@ class TrackIn(BaseModel):
 
 
 @router.post("/track")
-def track_event(body: TrackIn, request: Request, user: User | None = Depends(current_user)):
-    from app.audit import write_track
+def track_event(
+    body: TrackIn,
+    request: Request,
+    user: User | None = Depends(current_user),
+    nav_console: str | None = Cookie(default=None),
+):
+    from app.audit import session_user_id, write_track
     if not rate_limit(f"track:{_client_ip(request)}", 80, 60):
         return {"ok": True}
-    write_track(body.action.strip(), body.detail.strip(), _client_ip(request), user.id if user else None)
+    admin_view = body.detail.strip().startswith("admin:")
+    user_id = session_user_id(nav_console) if admin_view else (user.id if user else None)
+    if admin_view and not user_id:
+        return {"ok": True}
+    write_track(body.action.strip(), body.detail.strip(), _client_ip(request), user_id, admin_view)
     return {"ok": True}
 
 

@@ -367,6 +367,11 @@ button, input, textarea, select { font: inherit; }
 .console-main { min-width: 0; overflow: auto; }
 .console-top { height: 56px; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 0 24px; background: #fff; border-bottom: 1px solid #e8ecf1; position: sticky; top: 0; z-index: 2; }
 .console-top strong { font-size: 15px; }
+.console-title { display: flex; align-items: center; gap: 12px; }
+.list-tools { display: flex; justify-content: flex-end; }
+.refresh-btn { height: 32px; padding: 0 12px; border: 1px solid #d0d5dd; border-radius: 8px; background: #fff; color: #344054; cursor: pointer; font-size: 13px; }
+.refresh-btn:hover { border-color: #2f6fed; color: #2f6fed; }
+.refresh-btn:disabled { color: #98a2b3; cursor: default; }
 .console-top em { font-style: normal; color: #98a2b3; font-size: 13px; }
 .console-user { position: relative; }
 .console-user .user-mail { border: 0; background: transparent; color: #667085; font-size: 13px; cursor: pointer; padding: 6px 2px; }

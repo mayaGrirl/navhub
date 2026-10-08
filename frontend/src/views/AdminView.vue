@@ -199,7 +199,7 @@ const logAction = ref("");
 const logResult = ref("");
 const logIp = ref("");
 function isAdminLog(row) {
-  return row.role === "admin" || String(row.action || "").startsWith("admin");
+  return row.role === "admin";
 }
 const logActions = computed(() => {
   const pool = actions.value.filter((row) => (logKind.value === "admin" ? isAdminLog(row) : !isAdminLog(row)));
@@ -323,6 +323,8 @@ const pageNames = {
 };
 function placeName(raw) {
   const key = String(raw || "").trim();
+  if (key.startsWith("/:")) return `${tx("首页", "Home")} · ${key.slice(2)}`;
+  if (key.startsWith("submit:")) return `${tx("个人中心", "Account")} · ${placeName(key.slice(7))}`;
   const pair = pageNames[key];
   return pair ? tx(pair[0], pair[1]) : key;
 }
@@ -333,13 +335,15 @@ function actionText(row) {
     const where = placeName(detail);
     return where ? `${base} · ${where}` : base;
   }
-  const hit = detail.match(/^(GET|POST|PUT|PATCH|DELETE)\s+\/api\/(.+)$/);
+  const hit = detail.match(/^(GET|POST|PUT|PATCH|DELETE)\s+(\S+)(?:\s+([\s\S]+))?$/);
   if (!hit) return detail && detail !== row.action ? `${base} · ${detail}` : base;
   const verb = { POST: tx("新增", "Create"), PUT: tx("修改", "Update"), PATCH: tx("修改", "Update"), DELETE: tx("删除", "Delete"), GET: tx("查看", "Open") }[hit[1]] || hit[1];
-  const parts = hit[2].split("/").filter(Boolean);
-  const tail = parts[parts.length - 1];
+  const path = hit[2].replace(/\?.*$/, "");
+  const parts = path.replace(/^\/api\//, "").split("/").filter(Boolean);
+  const tail = parts[parts.length - 1] || "";
   const id = /^\d+$/.test(tail) ? ` #${tail}` : "";
-  return `${verb}${base}${id}`;
+  const extra = [hit[3], hit[2].includes("?") ? hit[2].split("?")[1] : ""].filter(Boolean).join(" ");
+  return extra ? `${verb}${base}${id} · ${extra}` : `${verb}${base}${id}`;
 }
 const proxyKind = ref("alive");
 const activeView = computed(() => {
@@ -474,6 +478,17 @@ const consoleCode = ref("");
 const needConsole = ref(false);
 
 const listLoading = ref(true);
+const refreshing = ref(false);
+async function refreshSection() {
+  if (refreshing.value) return;
+  refreshing.value = true;
+  try {
+    await load(true);
+    if (section.value === "crawl") await loadLogs();
+  } finally {
+    refreshing.value = false;
+  }
+}
 let loadSeq = 0;
 async function load(quiet = false) {
   const seq = ++loadSeq;
@@ -1207,7 +1222,10 @@ async function consoleLogout() {
     </aside>
     <div class="console-main">
     <header class="console-top">
-      <strong>{{ sectionTitle }}</strong>
+      <div class="console-title">
+        <strong>{{ sectionTitle }}</strong>
+        <button type="button" class="refresh-btn" :disabled="refreshing" @click="refreshSection">{{ refreshing ? tx("刷新中", "Refreshing") : tx("刷新", "Refresh") }}</button>
+      </div>
       <div class="console-user" @click.stop>
         <button type="button" class="user-mail" @click="userOpen = !userOpen">{{ me.email }}</button>
         <div v-if="userOpen" class="user-menu">
@@ -1218,6 +1236,7 @@ async function consoleLogout() {
     </header>
     <div class="admin">
       <section v-if="section === 'overview'" class="form overview">
+        <div class="list-tools"><button type="button" class="refresh-btn" :disabled="refreshing" @click="refreshSection">{{ refreshing ? tx("刷新中", "Refreshing") : tx("刷新", "Refresh") }}</button></div>
         <div v-if="listLoading" class="list-mask"><i></i><span>{{ tx("正在加载", "Loading") }}</span></div>
         <div class="stat-row">
           <div v-for="item in bars" :key="item.name"><b>{{ item.n }}</b><span>{{ item.name }}</span></div>
@@ -1332,6 +1351,7 @@ async function consoleLogout() {
           <input v-if="section !== 'categories' && section !== 'levels' && section !== 'ads' && section !== 'actions'" v-model="query" :placeholder="section === 'users' ? tx('搜索邮箱或 IP', 'Search email or IP') : section === 'proxies' ? tx('搜索代理地址', 'Search proxy') : tx('搜索名称或地址', 'Search name or URL')" />
           </div>
           <div class="actions">
+          <button type="button" class="refresh-btn" :disabled="refreshing" @click="refreshSection">{{ refreshing ? tx("刷新中", "Refreshing") : tx("刷新", "Refresh") }}</button>
           <button v-if="section === 'links'" class="primary" type="button" @click="openNew('link')">{{ tx("新增", "Add") }}</button>
           <button v-if="section === 'structure'" class="primary" type="button" @click="openNew('tab')">{{ tx("新增栏目", "Add tab") }}</button>
           <button v-if="section === 'structure'" type="button" @click="section = 'categories'">{{ tx("分类列表", "Categories") }}</button>
@@ -1375,6 +1395,7 @@ async function consoleLogout() {
         <p v-if="section === 'levels'">{{ tx("积分门槛和每分钟代理次数可以改。等级本身固定为 0 到 10。", "Point thresholds and proxy limits can be edited. Levels stay 0 to 10.") }}</p>
         <p v-if="section === 'proxies'">{{ proxies.note || tx("每 3 分钟检测一次，打不开的代理会删掉。", "Checked every 3 minutes. Unusable proxies are removed.") }}</p>
         <div v-if="section === 'security'" class="security-page">
+          <div class="list-tools"><button type="button" class="refresh-btn" :disabled="refreshing" @click="refreshSection">{{ refreshing ? tx("刷新中", "Refreshing") : tx("刷新", "Refresh") }}</button></div>
           <article class="security-card">
             <header>
               <h3>{{ tx("验证器", "Authenticator") }}</h3>
@@ -1419,6 +1440,7 @@ async function consoleLogout() {
         </div>
 
         <div v-else-if="section === 'mail'" class="mail-page">
+          <div class="list-tools"><button type="button" class="refresh-btn" :disabled="refreshing" @click="refreshSection">{{ refreshing ? tx("刷新中", "Refreshing") : tx("刷新", "Refresh") }}</button></div>
           <nav class="mail-tabs">
             <button type="button" :class="{ on: mailTab === 'channels' }" @click="mailTab = 'channels'">{{ tx("通道", "Channels") }}</button>
             <button type="button" :class="{ on: mailTab === 'send' }" @click="mailTab = 'send'">{{ tx("发信", "Send") }}</button>
@@ -1517,6 +1539,7 @@ async function consoleLogout() {
         </div>
 
         <div v-else-if="section === 'feedback'" class="feedback-admin">
+          <div class="list-tools"><button type="button" class="refresh-btn" :disabled="refreshing" @click="refreshSection">{{ refreshing ? tx("刷新中", "Refreshing") : tx("刷新", "Refresh") }}</button></div>
           <article class="security-card">
             <header><h3>{{ tx("反馈工单", "Tickets") }}</h3></header>
             <p v-if="!feedbackRows.length">{{ tx("还没有反馈", "No tickets yet") }}</p>

@@ -7,15 +7,14 @@ http.interceptors.request.use(async (config) => {
   return config;
 });
 
-const PUBLIC = new Set(["/", "/about", "/contact", "/advertise", "/login", "/register", "/submit"]);
-
 export function track(action, detail = "") {
   http.post("/track", { action, detail: String(detail || "").slice(0, 300) }).catch(() => {});
 }
 
 export function installTrack(router) {
+  const named = new Set(["/about", "/contact", "/advertise", "/login", "/register"]);
   router.afterEach((to) => {
-    if (PUBLIC.has(to.path)) track("view", to.path);
+    if (named.has(to.path)) track("view", to.path);
   });
 }
 

@@ -98,6 +98,27 @@ def action_for(method: str, path: str) -> str | None:
     return None
 
 
+def safe_params(raw: bytes) -> str:
+    try:
+        data = json.loads(raw.decode("utf-8", "ignore") or "")
+    except Exception:
+        return ""
+    if not isinstance(data, dict):
+        return ""
+    hidden = {"password", "current_password", "new_password", "totp", "secret"}
+    parts = []
+    for key, value in data.items():
+        name = str(key).lower()
+        if name in hidden or name.endswith("pass") or name.endswith("_key") or name.endswith("token"):
+            continue
+        text = value if isinstance(value, (str, int, float, bool)) or value is None else json.dumps(value, ensure_ascii=False)
+        text = str(text).replace("\n", " ")
+        if len(text) > 80:
+            text = text[:80] + "…"
+        parts.append(f"{key}={text}")
+    return ", ".join(parts)[:500]
+
+
 def _email_hint(raw: bytes) -> str:
     try:
         data = json.loads(raw.decode("utf-8", "ignore") or "{}")
@@ -121,7 +142,7 @@ def add_log(db, user_id: int | None, email: str, role: str, action: str, ok: boo
         role=(role or "")[:20],
         action=(action or "")[:40],
         ok=bool(ok),
-        detail=(detail or "")[:300],
+        detail=(detail or "")[:800],
         ip=(ip or "")[:64],
     ))
     now = time.time()
@@ -130,7 +151,7 @@ def add_log(db, user_id: int | None, email: str, role: str, action: str, ok: boo
         purge_old(db)
 
 
-def write_action(method: str, path: str, query: str, status: int, ip: str, user_id: int | None, email_hint: str) -> None:
+def write_action(method: str, path: str, query: str, status: int, ip: str, user_id: int | None, email_hint: str, params: str = "") -> None:
     action = action_for(method, path)
     if not action:
         return
@@ -138,13 +159,23 @@ def write_action(method: str, path: str, query: str, status: int, ip: str, user_
     if action == "search" and query:
         from urllib.parse import parse_qs
         text = (parse_qs(query).get("q") or [""])[0].strip()
-        detail = (text or query)[:300]
+        detail = (text or query)[:800]
+    elif params:
+        detail = f"{detail} {params}"[:800]
+    elif query and method == "DELETE":
+        detail = f"{detail}?{query}"[:800]
     db = SessionLocal()
     try:
         user = db.get(User, user_id) if user_id else None
         if not user and email_hint:
             user = db.query(User).filter(User.email == email_hint).one_or_none()
-        role = user.role if user else ("admin" if action.startswith("admin") else "")
+        manage = path.startswith("/api/manage") or path.startswith("/api/auth/console")
+        if manage and user and user.role == "admin":
+            role = "admin"
+        elif manage:
+            role = "admin"
+        else:
+            role = user.role if user else ""
         add_log(
             db,
             user.id if user else None,
@@ -162,12 +193,14 @@ def write_action(method: str, path: str, query: str, status: int, ip: str, user_
         db.close()
 
 
-def write_track(action: str, detail: str, ip: str, user_id: int | None) -> None:
+def write_track(action: str, detail: str, ip: str, user_id: int | None, as_admin: bool = False) -> None:
     if action not in TRACK_ACTIONS:
         return
     db = SessionLocal()
     try:
         user = db.get(User, user_id) if user_id else None
+        if as_admin and (not user or user.role != "admin"):
+            return
         add_log(
             db,
             user.id if user else None,

@@ -268,12 +268,21 @@ function onBannerUp(event) {
   else if (delta < -40) moveBanner(1);
 }
 
+function tabLabel(tab) {
+  if (!tab) return "";
+  return locale.value === "zh" ? (tab.title_zh || tab.title_en || "") : (tab.title_en || tab.title_zh || "");
+}
+function trackHome() {
+  const name = tabLabel(currentTab.value);
+  track("view", name ? `/:${name}` : "/");
+}
+
 function pickTab(id) {
   if (id === tabId.value) return;
   const next = tabs.value.find((item) => item.id === id);
   if (next && next.kind !== "home") boardLoading.value = true;
   tabId.value = id;
-  track("tab", next ? (next.title_zh || next.title_en || next.slug || id) : id);
+  trackHome();
 }
 
 function allowAdult() {
@@ -286,6 +295,7 @@ function leaveAdult() {
   track("adult", "leave");
   const home = tabs.value.find((item) => item.kind === "home");
   if (home) tabId.value = home.id;
+  trackHome();
 }
 
 async function logout() {
@@ -434,6 +444,7 @@ async function focusHit(hit) {
   activeSection.value = hit.category_id;
   await nextTick();
   document.getElementById(`link-${hit.id}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+  trackHome();
 }
 
 function searchWord(word) {
@@ -488,6 +499,7 @@ onMounted(async () => {
   }).catch(() => {});
   try {
     applyHome((await home).data);
+    if (!route.query.link) trackHome();
   } catch {
     homeReady.value = true;
   }
