@@ -518,6 +518,7 @@ onUnmounted(() => {
       </div>
       <div class="nav-links">
         <a :href="user ? '/submit?tab=proxy' : '/login?next=' + encodeURIComponent('/submit?tab=proxy')">{{ t("proxyPool") }}</a>
+        <a :href="user ? '/submit?tab=video' : '/login?next=' + encodeURIComponent('/submit?tab=video')">{{ t("videoEntry") }}</a>
         <a v-if="user" href="/submit">{{ t("center") }}</a>
         <FeedbackBox :logged-in="!!user" />
         <button class="text-btn" @click="setLocale(locale === 'en' ? 'zh' : 'en')">{{ locale === "en" ? "中文" : "EN" }}</button>

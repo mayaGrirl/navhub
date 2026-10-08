@@ -611,6 +611,48 @@ async def create_feedback(request: Request, user: User = Depends(require_user), 
     return _feedback_payload(row, [])
 
 
+@router.get("/video/parsers")
+def video_parsers(locale: str = "en", user: User = Depends(require_user), db: Session = Depends(db_session)):
+    """返回午夜媒体下"视频解析"分类里已发布的解析站地址，供播放器下拉选择调试。"""
+    rows = db.execute(
+        select(Link)
+        .join(Category, Link.category_id == Category.id)
+        .join(Tab, Category.tab_id == Tab.id)
+        .where(
+            Tab.slug == "media",
+            Category.slug == "video-parse",
+            Link.status == "published",
+        )
+        .order_by(Link.sort, Link.id)
+    ).scalars().all()
+    return [
+        {"id": row.id, "title": _t(locale, row.title_en, row.title_zh), "url": row.url}
+        for row in rows
+    ]
+
+
+# 返回稳定的错误码（video_empty/blocked/unreachable/no_direct），由前端按语言翻译
+_VIDEO_ERROR_CODES = {"empty", "blocked", "unreachable", "no_direct"}
+
+
+@router.post("/video/resolve")
+def resolve_video_link(payload: dict, request: Request, user: User = Depends(require_user)):
+    from app.video import ResolveError, resolve_video
+
+    if not rate_limit(f"video:{user.id}", 30, 60):
+        raise HTTPException(status_code=429, detail="video_too_many")
+    url = (payload.get("url") or "").strip()
+    if not url:
+        raise HTTPException(status_code=400, detail="video_empty")
+    try:
+        result = resolve_video(url)
+    except ResolveError as exc:
+        reason = str(exc)
+        code = reason if reason in _VIDEO_ERROR_CODES else "no_direct"
+        raise HTTPException(status_code=400, detail=f"video_{code}") from exc
+    return result
+
+
 @router.post("/feedback/{feedback_id}/reply")
 def reply_feedback(feedback_id: int, payload: dict, user: User = Depends(require_user), db: Session = Depends(db_session)):
     row = db.get(Feedback, feedback_id)

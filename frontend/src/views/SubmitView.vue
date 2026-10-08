@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { useI18n } from "vue-i18n";
 import http from "../api";
@@ -56,7 +56,7 @@ onMounted(async () => {
     router.replace("/login");
     return;
   }
-  if (["proxy", "submit", "profile", "levels", "marks", "feedback"].includes(route.query.tab)) tab.value = route.query.tab;
+  if (["proxy", "submit", "profile", "levels", "marks", "video", "feedback"].includes(route.query.tab)) tab.value = route.query.tab;
   const [tokenRes, levelRes, rankRes, markRes] = await Promise.all([
     http.get("/proxy/token"),
     http.get("/me/level"),
@@ -69,6 +69,7 @@ onMounted(async () => {
   proxyToken.value = tokenRes.data.token || "";
   await loadSubmissions(1);
   ready.value = true;
+  loadParsers();
   const [treeRes, adRes] = await Promise.all([
     http.get("/tree", { params: { locale: locale.value } }),
     http.get("/ads", { params: { locale: locale.value } }),
@@ -241,6 +242,244 @@ async function send() {
   }
 }
 
+// ---- 视频播放 ----
+const videoUrl = ref("");           // 要播放的视频 / 网页地址
+const parserUrl = ref("");          // 解析源地址（可空，可从下拉选）
+const parsers = ref([]);            // 数据库里收录的解析站 [{id,title,url}]
+const videoLoading = ref(false);
+const videoError = ref("");
+const videoCurrent = ref(null);     // 直链 { url, kind, title }
+const frameUrl = ref("");           // iframe 要加载的最终地址
+const videoStage = ref(null);
+const frameStage = ref(null);
+const videoEl = ref(null);
+let hls = null;
+let flvPlayer = null;
+const HLS_CDN = "https://cdn.jsdelivr.net/npm/hls.js@1/dist/hls.min.js";
+const FLV_CDN = "https://cdn.jsdelivr.net/npm/flv.js@1.6.2/dist/flv.min.js";
+
+function isParserTemplate(url) {
+  const value = String(url || "").trim();
+  return /\{url\}/i.test(value) || /[?&]url=$/i.test(value);
+}
+
+async function loadParsers() {
+  try {
+    const { data } = await http.get("/video/parsers", { params: { locale: locale.value } });
+    parsers.value = data || [];
+  } catch {
+    parsers.value = [];
+  }
+}
+
+// select 当前显示的值：匹配到某个解析源就显示它，否则空（未选）或自定义
+const selectedParser = computed(() => {
+  const current = parserUrl.value.trim();
+  if (!current) return "";
+  if (parsers.value.some((p) => p.url === current)) return current;
+  return "__custom__";
+});
+
+function onParserSelect(value) {
+  if (value === "__custom__") {
+    parserUrl.value = "";
+    return;
+  }
+  parserUrl.value = value || "";
+}
+
+// 把解析源和视频地址拼成最终地址：解析源形如 https://x/?url= 直接拼接；
+// 若解析源不以 =、?、/ 结尾则补一个 = 分隔（覆盖常见写法），用户也可自行把完整地址填进解析源框。
+function buildFrameUrl() {
+  const parser = parserUrl.value.trim();
+  const video = videoUrl.value.trim();
+  if (!parser || !video || !isParserTemplate(parser)) return "";
+  if (/\{url\}/i.test(parser)) return parser.replace(/\{url\}/gi, encodeURIComponent(video));
+  return parser + encodeURIComponent(video);
+}
+
+function teardownVideo() {
+  if (hls) {
+    try { hls.destroy(); } catch { /* ignore */ }
+    hls = null;
+  }
+  if (flvPlayer) {
+    try { flvPlayer.destroy(); } catch { /* ignore */ }
+    flvPlayer = null;
+  }
+  const el = videoEl.value;
+  if (el) {
+    try {
+      el.pause();
+      el.removeAttribute("src");
+      el.load();
+    } catch { /* ignore */ }
+  }
+}
+
+function clearVideo() {
+  teardownVideo();
+  videoCurrent.value = null;
+  frameUrl.value = "";
+  videoError.value = "";
+}
+
+function loadPlayerScript(src, mark) {
+  return new Promise((resolve, reject) => {
+    const ready = mark === "hls" ? window.Hls : window.flvjs;
+    if (ready) return resolve();
+    const existing = document.querySelector(`script[data-player="${mark}"]`);
+    if (existing) {
+      if (existing.dataset.loaded === "1") return resolve();
+      if (existing.dataset.failed === "1") existing.remove();
+      else {
+        existing.addEventListener("load", () => resolve(), { once: true });
+        existing.addEventListener("error", () => reject(new Error(mark)), { once: true });
+        return;
+      }
+    }
+    const script = document.createElement("script");
+    script.src = src;
+    script.async = true;
+    script.dataset.player = mark;
+    script.onload = () => { script.dataset.loaded = "1"; resolve(); };
+    script.onerror = () => { script.dataset.failed = "1"; reject(new Error(mark)); };
+    document.head.appendChild(script);
+  });
+}
+
+function loadHlsScript() {
+  return loadPlayerScript(HLS_CDN, "hls");
+}
+
+async function playHls(src) {
+  const el = videoEl.value;
+  if (!el) return;
+  if (el.canPlayType("application/vnd.apple.mpegurl")) {
+    el.src = src;
+    return;
+  }
+  try {
+    await loadHlsScript();
+  } catch {
+    videoError.value = t("videoStreamFailed");
+    return;
+  }
+  if (!window.Hls || !window.Hls.isSupported()) {
+    videoError.value = t("videoStreamFailed");
+    return;
+  }
+  hls = new window.Hls({ enableWorker: true });
+  hls.loadSource(src);
+  hls.attachMedia(el);
+  hls.on(window.Hls.Events.ERROR, (_evt, data) => {
+    if (data && data.fatal) videoError.value = t("videoStreamFailed");
+  });
+}
+
+async function playFlv(src) {
+  const el = videoEl.value;
+  if (!el) return;
+  try {
+    await loadPlayerScript(FLV_CDN, "flv");
+  } catch {
+    videoError.value = t("videoStreamFailed");
+    return;
+  }
+  if (!window.flvjs || !window.flvjs.isSupported()) {
+    videoError.value = t("videoStreamFailed");
+    return;
+  }
+  flvPlayer = window.flvjs.createPlayer({ type: "flv", url: src });
+  flvPlayer.attachMediaElement(el);
+  flvPlayer.load();
+  flvPlayer.on(window.flvjs.Events.ERROR, () => {
+    videoError.value = t("videoStreamFailed");
+  });
+}
+
+async function startVideo(result) {
+  teardownVideo();
+  videoCurrent.value = result;
+  await Promise.resolve();
+  const el = videoEl.value;
+  if (!el) return;
+  if (result.kind === "hls") await playHls(result.url);
+  else if (result.kind === "flv") await playFlv(result.url);
+  else el.src = result.url;
+  try { await el.play(); } catch { /* 自动播放可能被拦，用户可手动点 */ }
+}
+
+async function resolveVideo() {
+  if (videoLoading.value) return;
+  videoError.value = "";
+
+  // 有解析源：走 iframe 嵌入模式，加载用户选/填的最终地址
+  if (parserUrl.value.trim()) {
+    const target = buildFrameUrl();
+    if (!target) {
+      videoError.value = t("videoParserInvalid");
+      return;
+    }
+    teardownVideo();
+    videoCurrent.value = null;
+    frameUrl.value = target;
+    return;
+  }
+
+  // 无解析源：按直链解析在站内原生播放
+  const value = videoUrl.value.trim();
+  if (!value) {
+    videoError.value = t("video_empty");
+    return;
+  }
+  videoLoading.value = true;
+  frameUrl.value = "";
+  try {
+    const { data } = await http.post("/video/resolve", { url: value });
+    await startVideo(data);
+  } catch (err) {
+    const detail = err.response?.data?.detail;
+    videoError.value = detail ? t(detail) : t("videoPlayFailed");
+    videoCurrent.value = null;
+  } finally {
+    videoLoading.value = false;
+  }
+}
+
+function toggleFrameFullscreen() {
+  const target = frameStage.value;
+  if (!target) return;
+  if (document.fullscreenElement) {
+    document.exitFullscreen?.();
+  } else if (target.requestFullscreen) {
+    target.requestFullscreen();
+  }
+}
+
+function onVideoError() {
+  if (!videoError.value) videoError.value = t("videoPlayFailed");
+}
+
+function toggleVideoFullscreen() {
+  const target = videoStage.value || videoEl.value;
+  if (!target) return;
+  if (document.fullscreenElement) {
+    document.exitFullscreen?.();
+  } else if (target.requestFullscreen) {
+    target.requestFullscreen();
+  } else if (videoEl.value?.webkitEnterFullscreen) {
+    // iOS Safari 只支持 video 元素原生全屏
+    videoEl.value.webkitEnterFullscreen();
+  }
+}
+
+watch(tab, (value) => {
+  if (value === "video") loadParsers();
+}, { immediate: true });
+
+onBeforeUnmount(teardownVideo);
+
 async function logout() {
   await http.post("/auth/logout");
   router.push("/");
@@ -263,6 +502,7 @@ async function logout() {
         <button type="button" :class="{ on: tab === 'marks' }" @click="tab = 'marks'">{{ locale === "zh" ? "收藏推荐" : "Saved" }}</button>
         <button type="button" :class="{ on: tab === 'submit' }" @click="tab = 'submit'">{{ t("submit") }}</button>
         <button type="button" :class="{ on: tab === 'proxy' }" @click="tab = 'proxy'">{{ t("proxyPool") }}</button>
+        <button type="button" :class="{ on: tab === 'video' }" @click="tab = 'video'">{{ t("videoPlayer") }}</button>
         <button type="button" :class="{ on: tab === 'feedback' }" @click="tab = 'feedback'">{{ locale === "zh" ? "网站反馈" : "Feedback" }}</button>
         <a href="/">{{ locale === "zh" ? "返回主页" : "Back to home" }}</a>
         <button type="button" @click="logout">{{ t("logout") }}</button>
@@ -408,6 +648,59 @@ Authorization: Bearer 你的令牌</pre>
 curl -x http://1.2.3.4:8080 https://example.com</pre>
       <p>{{ locale === "zh" ? "把 proxy 字段原样用作 HTTP 代理。再次点击生成会换掉旧令牌。定时抓取不使用这个令牌，它直接访问代理池。" : "Use the proxy field as an HTTP proxy. Generating again replaces the old token. Scheduled crawls do not use this token; they call the pool directly." }}</p>
     </section>
+    <section v-else-if="tab === 'video'" class="page form video-panel">
+      <h1>{{ t("videoPlayer") }}</h1>
+      <p class="meta">{{ t("videoLead") }}</p>
+
+      <label>{{ t("videoParserLabel") }}</label>
+      <select class="video-select" :value="selectedParser" @change="onParserSelect($event.target.value)">
+        <option value="">{{ t("videoNoParser") }}</option>
+        <option v-for="p in parsers" :key="p.id" :value="p.url">{{ p.title }}</option>
+        <option value="__custom__">{{ t("videoParserCustom") }}</option>
+      </select>
+      <p v-if="!parsers.length" class="meta">{{ t("videoParserEmpty") }}</p>
+      <input v-model="parserUrl" type="text" :placeholder="t('videoParserPlaceholder')" />
+      <p class="meta">{{ t("videoParserHint") }}</p>
+
+      <label>{{ t("videoUrlLabel") }}</label>
+      <form class="video-form" @submit.prevent="resolveVideo">
+        <input v-model="videoUrl" type="url" :placeholder="t('videoPlaceholder')" />
+        <button class="primary" type="submit" :disabled="videoLoading">{{ videoLoading ? t("videoResolving") : t("videoPlay") }}</button>
+      </form>
+      <p v-if="videoError" class="video-error">{{ videoError }}</p>
+
+      <!-- 直链：站内 HTML5 原生播放 -->
+      <div v-if="videoCurrent" ref="videoStage" class="video-stage">
+        <video ref="videoEl" controls playsinline preload="metadata" @error="onVideoError"></video>
+        <div class="video-bar">
+          <button type="button" @click="toggleVideoFullscreen">{{ t("videoFullscreen") }}</button>
+          <button type="button" @click="clearVideo">{{ t("videoClose") }}</button>
+          <span v-if="videoCurrent.title" class="video-name">{{ videoCurrent.title }}</span>
+        </div>
+        <p class="video-src">{{ videoCurrent.url }}</p>
+      </div>
+
+      <!-- 解析源：iframe 嵌入用户选/填的地址，可拖拽改大小、全屏 -->
+      <div v-if="frameUrl" class="frame-block">
+        <p class="meta frame-note">{{ t("videoFrameNote") }}</p>
+        <div ref="frameStage" class="frame-stage">
+          <iframe
+            :src="frameUrl"
+            class="frame-player"
+            allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
+            allowfullscreen
+            referrerpolicy="no-referrer"
+            sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-presentation"
+          ></iframe>
+        </div>
+        <div class="video-bar">
+          <button type="button" @click="toggleFrameFullscreen">{{ t("videoFullscreen") }}</button>
+          <button type="button" @click="clearVideo">{{ t("videoClose") }}</button>
+          <span class="video-drag-hint">{{ t("videoDragHint") }}</span>
+        </div>
+        <p class="video-src">{{ frameUrl }}</p>
+      </div>
+    </section>
     <section v-else-if="tab === 'feedback'" class="page feedback-page">
       <FeedbackBox inline :logged-in="true" />
     </section>
@@ -447,3 +740,167 @@ curl -x http://1.2.3.4:8080 https://example.com</pre>
     </aside>
   </div>
 </template>
+
+<style scoped>
+.video-form {
+  display: flex;
+  gap: 10px;
+  margin-top: 6px;
+}
+.video-form input {
+  flex: 1;
+  min-width: 0;
+}
+.video-select {
+  width: 100%;
+  padding: 11px 14px;
+  border: 1px solid var(--line, #d1d5db);
+  border-radius: 10px;
+  font-size: 0.95rem;
+  background: #fff;
+  cursor: pointer;
+}
+.video-error {
+  margin: 12px 0 0;
+  color: #dc2626;
+  font-size: 0.92rem;
+}
+.video-stage {
+  margin-top: 18px;
+  background: #000;
+  border-radius: 12px;
+  padding: 8px;
+}
+.video-stage video {
+  width: 100%;
+  max-height: 70vh;
+  aspect-ratio: 16 / 9;
+  background: #000;
+  border-radius: 8px;
+  display: block;
+}
+.video-stage:fullscreen {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 0;
+  border-radius: 0;
+}
+.video-stage:fullscreen video {
+  max-height: 100vh;
+  height: 100vh;
+  aspect-ratio: auto;
+  border-radius: 0;
+}
+.video-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 8px;
+  padding: 0 2px;
+}
+.video-bar button {
+  border: 1px solid rgba(255, 255, 255, 0.4);
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+  padding: 6px 14px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+.video-bar button:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+.video-stage:fullscreen .video-bar {
+  position: fixed;
+  bottom: 16px;
+  left: 16px;
+  z-index: 2;
+}
+.video-name {
+  color: #fff;
+  font-size: 0.88rem;
+}
+.video-src {
+  margin: 6px 2px 0;
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 0.78rem;
+  word-break: break-all;
+}
+.video-stage:fullscreen .video-src {
+  display: none;
+}
+
+/* iframe 嵌入播放器：可拖拽改变大小 */
+.frame-block {
+  margin-top: 18px;
+}
+.frame-note {
+  margin: 0 0 8px;
+}
+.frame-stage {
+  position: relative;
+  width: 100%;
+  height: 56.25vw;
+  max-height: 70vh;
+  min-height: 220px;
+  min-width: 280px;
+  background: #000;
+  border-radius: 12px;
+  overflow: hidden;
+  resize: both;
+}
+.frame-player {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  display: block;
+}
+/* 右下角拖拽提示角标，配合 CSS resize */
+.frame-stage::after {
+  content: "";
+  position: absolute;
+  right: 2px;
+  bottom: 2px;
+  width: 14px;
+  height: 14px;
+  pointer-events: none;
+  background: linear-gradient(135deg, transparent 50%, rgba(255, 255, 255, 0.5) 50%, rgba(255, 255, 255, 0.5) 60%, transparent 60%, transparent 72%, rgba(255, 255, 255, 0.5) 72%, rgba(255, 255, 255, 0.5) 82%, transparent 82%);
+  z-index: 1;
+}
+.frame-stage:fullscreen {
+  width: 100vw;
+  height: 100vh;
+  max-height: none;
+  border-radius: 0;
+  resize: none;
+}
+.video-drag-hint {
+  color: var(--muted, #6b7280);
+  font-size: 0.8rem;
+}
+@media (max-width: 860px) {
+  .video-panel { overflow-x: hidden; }
+  .video-form { flex-direction: column; }
+  .video-form .primary { width: 100%; min-height: 44px; }
+  .video-select, .video-panel input { font-size: 16px; }
+  .video-bar { flex-wrap: wrap; gap: 8px; }
+  .video-bar button { min-height: 40px; }
+  .video-stage video { max-height: 56vw; }
+  .frame-stage {
+    min-width: 0;
+    width: 100%;
+    height: auto;
+    aspect-ratio: 16 / 9;
+    max-height: 70vh;
+    resize: none;
+  }
+  .frame-stage::after, .video-drag-hint { display: none; }
+  .video-stage:fullscreen .video-bar,
+  .frame-stage:fullscreen + .video-bar {
+    left: max(12px, env(safe-area-inset-left));
+    right: max(12px, env(safe-area-inset-right));
+    bottom: max(12px, env(safe-area-inset-bottom));
+  }
+}
+</style>

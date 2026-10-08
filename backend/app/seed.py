@@ -611,6 +611,68 @@ MISC = [
 ]
 
 
+# 午夜媒体下"视频解析"分类的种子：公开 / 开源的第三方视频解析站点。
+# 仅作为导航外链收录，站内不调用、不嵌入、不播放其内容。
+VIDEO_PARSE = [
+    ("rpsofts", "RPSofts 解析", "http://v.rpsofts.com/v/vip/m/index.php?url=", "第三方视频解析接口"),
+    ("jsonplayer", "JSON Player (开源)", "https://github.com/van-k/VideoParse", "开源解析项目"),
+    ("ckplayer", "CKPlayer", "https://www.ckplayer.com/", "开源网页播放器"),
+    ("dplayer", "DPlayer", "https://dplayer.diygod.dev/", "开源 HTML5 播放器"),
+    ("artplayer", "ArtPlayer", "https://artplayer.org/", "开源 HTML5 播放器"),
+    ("videojs", "Video.js", "https://videojs.com/", "开源网页播放器"),
+    ("hlsjs", "hls.js", "https://github.com/video-dev/hls.js/", "开源 HLS 播放库"),
+    ("flvjs", "flv.js", "https://github.com/bilibili/flv.js/", "开源 FLV 播放库"),
+    ("ffmpeg", "FFmpeg", "https://ffmpeg.org/", "开源音视频处理"),
+    ("ytdlp", "yt-dlp", "https://github.com/yt-dlp/yt-dlp", "开源公开视频下载"),
+]
+
+
+def ensure_video_parse(db: Session) -> None:
+    """在午夜媒体(media)栏目下保证存在"视频解析"二级分类，并收录公开/开源解析站。
+
+    不受 auto_crawl 门槛限制：这是产品固定分类，始终存在。
+    """
+    import random
+
+    tab = db.scalar(select(Tab).where(Tab.slug == "media"))
+    if not tab:
+        return
+    category = db.scalar(select(Category).where(Category.tab_id == tab.id, Category.slug == "video-parse"))
+    if not category:
+        category = Category(
+            tab_id=tab.id,
+            slug="video-parse",
+            title_en="Video parsing",
+            title_zh="视频解析",
+            sort=0,
+            visible=True,
+        )
+        db.add(category)
+        db.flush()
+    for slug_zh, name, url, desc in VIDEO_PARSE:
+        key = norm_url(url)
+        if db.scalar(select(Link.id).where(Link.category_id == category.id, Link.norm_url == key)):
+            continue
+        db.add(
+            Link(
+                category_id=category.id,
+                title_en=name,
+                title_zh=name,
+                description_en=desc,
+                description_zh=desc,
+                url=url,
+                norm_url=key,
+                status="published",
+                source="admin",
+                favorite_count=random.randint(6, 96),
+                recommend_count=random.randint(2, 48),
+                click_count=random.randint(12, 240),
+                counts_ready=True,
+                clicks_ready=True,
+            )
+        )
+
+
 def ensure_misc(db: Session) -> None:
     import random
 
@@ -771,6 +833,7 @@ def seed(db: Session) -> str:
         row.visible = visible
         row.adult = adult
     if db.scalar(select(Tab.id)):
+        ensure_video_parse(db)
         ensure_misc(db)
         ensure_world(db)
         db.commit()
@@ -835,5 +898,7 @@ def seed(db: Session) -> str:
             body_zh="广告位在管理后台配置。",
         )
     )
+    db.flush()
+    ensure_video_parse(db)
     db.commit()
     return gate
