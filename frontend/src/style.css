@@ -178,6 +178,20 @@ button, input, textarea, select { font: inherit; }
   min-height: 96px;
 }
 .card > div { min-width: 0; flex: 1; }
+.card-flags { position: absolute; top: 6px; left: 6px; z-index: 2; display: grid; gap: 4px; }
+.flag { display: inline-flex; align-items: center; justify-content: center; min-width: 36px; height: 18px; padding: 0 6px; border-radius: 999px; font-style: normal; font-size: 10px; font-weight: 800; letter-spacing: .04em; line-height: 1; color: #fff; }
+.flag.hot {
+  background: linear-gradient(90deg, #ff4d4f, #ff9a3c 50%, #ff4d4f);
+  background-size: 200% 100%;
+  box-shadow: 0 0 0 0 rgba(255, 77, 79, .55);
+  animation: hot-shine 1.4s linear infinite, hot-pop 1.4s ease-in-out infinite;
+}
+.flag.free { background: #12b76a; }
+@keyframes hot-shine { to { background-position: -200% 0; } }
+@keyframes hot-pop {
+  0%, 100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(255, 77, 79, .45); }
+  50% { transform: scale(1.08); box-shadow: 0 0 10px 2px rgba(255, 122, 60, .55); }
+}
 .card-head { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
 .card-head h3 { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .card-marks { display: flex; gap: 2px; flex: none; }
